@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Birdsong Manifold</title>
+  <style>
+    body { margin: 0; background: #000; color: #fff; font-family: sans-serif; }
+    canvas { display: block; }
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      pointer-events: none;
+    }
+    #label {
+      font-size: 13px;
+      color: #00ffcc;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.7);
+      cursor: pointer;
+      z-index: 10;
+    }
+    #overlay span {
+      font-size: 22px;
+      color: #00ffcc;
+      border: 2px solid #00ffcc;
+      padding: 14px 36px;
+      border-radius: 30px;
+      letter-spacing: 3px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="overlay"><span>&#9654; CLICK TO START</span></div>
+
+<div id="ui">
+  <div id="label">Raven &mdash; Spatiotemporal Acoustic Manifold</div>
+</div>
+
+<script type="importmap">
+  { "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }}
+</script>
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  // --- Renderer ---
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // --- Scene / Camera ---
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 100);
+  camera.position.set(0, 0, 3);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.5;
+  controls.enableDamping = true;
+
+  // --- Audio ---
+  const audio = new Audio('./birds/raven.mp3');
+  audio.loop = true;
+
+  // --- Clock (drives animation independently of audio) ---
+  const clock = new THREE.Clock(false);
+  let started = false;
+
+  // --- Click overlay to start BOTH together ---
+  const overlay = document.getElementById('overlay');
+  overlay.addEventListener('click', () => {
+    audio.play();
+    overlay.style.display = 'none';
+    started = true;
+    clock.start();
+  }, { once: true });
+
+  // --- Load data ---
+  const data = await fetch('./birdsong_data.json').then(r => r.json());
+  const tracers = [];
+
+  for (const [species, coords] of Object.entries(data)) {
+    const points = coords.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    const total = points.length;
+
+    // Dim full path
+    const trailGeo = new THREE.BufferGeometry().setFromPoints(points);
+    scene.add(new THREE.Line(trailGeo,
+      new THREE.LineBasicMaterial({ color: 0x004444, transparent: true, opacity: 0.25 })
+    ));
+
+    // Moving dot
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.018, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0x00ffcc })
+    );
+    scene.add(dot);
+
+    // Glowing tail
+    const tailLength = 40;
+    const tailPositions = new Float32Array(tailLength * 3);
+    const tailGeo = new THREE.BufferGeometry();
+    tailGeo.setAttribute('position', new THREE.BufferAttribute(tailPositions, 3));
+    scene.add(new THREE.Line(tailGeo,
+      new THREE.LineBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.6 })
+    ));
+
+    // traversalTime matches librosa duration=10
+    const traversalTime = 10;
+
+    tracers.push({ points, total, dot, tailGeo, tailPositions, tailLength, traversalTime });
+  }
+
+  // --- Animate ---
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+
+    if (started) {
+      const elapsed = clock.getElapsedTime();
+
+      for (const t of tracers) {
+        const progress = (elapsed % t.traversalTime) / t.traversalTime;
+        const i = Math.floor(progress * t.total) % t.total;
+        const pos = t.points[i];
+
+        t.dot.position.copy(pos);
+
+        for (let j = t.tailLength - 1; j > 0; j--) {
+          t.tailPositions[j * 3]     = t.tailPositions[(j - 1) * 3];
+          t.tailPositions[j * 3 + 1] = t.tailPositions[(j - 1) * 3 + 1];
+          t.tailPositions[j * 3 + 2] = t.tailPositions[(j - 1) * 3 + 2];
+        }
+        t.tailPositions[0] = pos.x;
+        t.tailPositions[1] = pos.y;
+        t.tailPositions[2] = pos.z;
+        t.tailGeo.attributes.position.needsUpdate = true;
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+</script>
+</body>
+</html>
