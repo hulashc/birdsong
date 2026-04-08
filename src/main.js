@@ -1,0 +1,300 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ── URL param ──────────────────────────────────────────
+const soundParam = new URLSearchParams(location.search)
+  .get('sound')?.trim().toLowerCase() ?? '';
+
+// ── Renderers ──────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x050508, 1);
+document.body.appendChild(renderer.domElement);
+
+const css2d = new CSS2DRenderer();
+css2d.setSize(innerWidth, innerHeight);
+css2d.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;z-index:5;';
+document.body.appendChild(css2d.domElement);
+
+// ── Scene / Camera ──────────────────────────────────────
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.001, 200);
+camera.position.set(2, 1.4, 3);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping   = true;
+controls.dampingFactor   = 0.06;
+controls.autoRotate      = true;
+controls.autoRotateSpeed = 0.35;
+controls.minDistance     = 1;
+controls.maxDistance     = 10;
+
+// ── Helpers ─────────────────────────────────────────────
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function energyToColor(e) {
+  const c = new THREE.Color();
+  c.setHSL(0.62 - clamp(e, 0, 1) * 0.62, 0.95, 0.58);
+  return c;
+}
+
+function smoothPoints(pts, divisions = 4) {
+  if (pts.length < 2) return pts;
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  return curve.getPoints(pts.length * divisions);
+}
+
+// ── Error display ────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('error-state');
+  if (el) {
+    el.querySelector('.error-msg').textContent = msg;
+    el.style.display = 'flex';
+  }
+  const overlay = document.getElementById('overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// ── Axes ─────────────────────────────────────────────────
+function addAxis(a, b, hex) {
+  const g = new THREE.BufferGeometry().setFromPoints([a, b]);
+  const m = new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.35 });
+  scene.add(new THREE.Line(g, m));
+}
+addAxis(new THREE.Vector3(-1.4,0,0), new THREE.Vector3(1.4,0,0), 0xff3333);
+addAxis(new THREE.Vector3(0,-1.4,0), new THREE.Vector3(0,1.4,0), 0x44ff88);
+addAxis(new THREE.Vector3(0,0,-1.4), new THREE.Vector3(0,0,1.4), 0x3a6fff);
+
+for (const v of [-1, -0.5, 0.5, 1]) {
+  const t = 0.025;
+  addAxis(new THREE.Vector3(v,-t,0), new THREE.Vector3(v,t,0), 0xff3333);
+  addAxis(new THREE.Vector3(-t,v,0), new THREE.Vector3(t,v,0), 0x44ff88);
+  addAxis(new THREE.Vector3(0,-t,v), new THREE.Vector3(0,t,v), 0x3a6fff);
+}
+
+function addAxisLabel(text, pos, col) {
+  const el = document.createElement('div');
+  el.textContent = text;
+  el.style.cssText = `color:${col};font-size:10px;letter-spacing:.15em;
+    padding:2px 5px;background:rgba(5,5,8,.5);border-radius:3px;
+    text-transform:uppercase;font-family:Helvetica Neue,sans-serif;`;
+  const obj = new CSS2DObject(el);
+  obj.position.copy(pos);
+  scene.add(obj);
+}
+addAxisLabel('PC1', new THREE.Vector3(1.48, 0.05, 0), '#ff5555');
+addAxisLabel('PC2', new THREE.Vector3(0.05, 1.48, 0), '#55ff88');
+addAxisLabel('PC3', new THREE.Vector3(0.05, 0, 1.48), '#5599ff');
+
+// ── Load JSON ─────────────────────────────────────────────
+let all, manifold, soundName;
+try {
+  const res = await fetch('./birdsong_data.json');
+  if (!res.ok) throw new Error(`HTTP ${res.status} — could not load birdsong_data.json`);
+  all = await res.json();
+} catch (err) {
+  showError(`Failed to load data: ${err.message}`);
+  throw err;
+}
+
+const isSingle = Array.isArray(all?.t) && Array.isArray(all?.xyz);
+if (isSingle) {
+  manifold  = all;
+  soundName = (all.species || soundParam || 'birdsong').toLowerCase();
+} else {
+  const keys = Object.keys(all);
+  if (!keys.length) {
+    showError('birdsong_data.json is empty — run process_birds.py first.');
+    throw new Error('Empty JSON');
+  }
+  soundName = (soundParam && all[soundParam]) ? soundParam : keys[0];
+  manifold  = all[soundName];
+}
+
+document.getElementById('titleSpecies').textContent =
+  soundName.replace(/_/g, ' ').toUpperCase();
+document.getElementById('label').textContent =
+  soundName.replace(/_/g, ' ').toUpperCase() + ' · Spatiotemporal Acoustic Manifold';
+
+const times  = manifold.t;
+const energy = manifold.energy || [];
+const rawPts = manifold.xyz.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+const points = smoothPoints(rawPts, 3);
+
+// ── Ghost path ────────────────────────────────────────────
+{
+  const positions = new Float32Array(points.length * 3);
+  const colors    = new Float32Array(points.length * 3);
+  points.forEach((p, i) => {
+    positions[i*3]   = p.x;
+    positions[i*3+1] = p.y;
+    positions[i*3+2] = p.z;
+    const ri = Math.floor((i / points.length) * rawPts.length);
+    const c  = energyToColor((energy[ri] ?? 0) * 0.4);
+    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+  scene.add(new THREE.Line(geo,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.08 })
+  ));
+}
+
+// ── Dot ───────────────────────────────────────────────────
+const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const dot    = new THREE.Mesh(new THREE.SphereGeometry(0.014, 16, 16), dotMat);
+scene.add(dot);
+
+// ── Comet tail ────────────────────────────────────────────
+const TAIL   = 280;
+const tPos   = new Float32Array(TAIL * 3);
+const tCol   = new Float32Array(TAIL * 3);
+const tRaw   = new Float32Array(TAIL * 3);
+
+const tailGeo = new THREE.BufferGeometry();
+tailGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+tailGeo.setAttribute('color',    new THREE.BufferAttribute(tCol, 3));
+scene.add(new THREE.Line(tailGeo,
+  new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 })
+));
+
+function pushTail(pos, e) {
+  for (let j = TAIL - 1; j > 0; j--) {
+    tPos[j*3]   = tPos[(j-1)*3];
+    tPos[j*3+1] = tPos[(j-1)*3+1];
+    tPos[j*3+2] = tPos[(j-1)*3+2];
+    tRaw[j*3]   = tRaw[(j-1)*3];
+    tRaw[j*3+1] = tRaw[(j-1)*3+1];
+    tRaw[j*3+2] = tRaw[(j-1)*3+2];
+  }
+  tPos[0] = pos.x; tPos[1] = pos.y; tPos[2] = pos.z;
+  const c = energyToColor(e);
+  tRaw[0] = c.r; tRaw[1] = c.g; tRaw[2] = c.b;
+  for (let j = 0; j < TAIL; j++) {
+    const f = Math.pow(1 - j / TAIL, 1.8);
+    tCol[j*3]   = tRaw[j*3]   * f;
+    tCol[j*3+1] = tRaw[j*3+1] * f;
+    tCol[j*3+2] = tRaw[j*3+2] * f;
+  }
+  tailGeo.attributes.position.needsUpdate = true;
+  tailGeo.attributes.color.needsUpdate    = true;
+}
+
+// ── Ink path ──────────────────────────────────────────────
+const inkPos  = new Float32Array(points.length * 3);
+const inkCol  = new Float32Array(points.length * 3);
+let   inkHead = 0;
+let   lastIdx = -1;
+
+const inkGeo  = new THREE.BufferGeometry();
+inkGeo.setAttribute('position', new THREE.BufferAttribute(inkPos, 3));
+inkGeo.setAttribute('color',    new THREE.BufferAttribute(inkCol, 3));
+inkGeo.setDrawRange(0, 0);
+scene.add(new THREE.Line(inkGeo,
+  new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 })
+));
+
+function inkPath(i, e) {
+  if (i === lastIdx || inkHead >= points.length) return;
+  lastIdx = i;
+  const pos = points[i];
+  const c   = energyToColor(e);
+  inkPos[inkHead*3]   = pos.x;
+  inkPos[inkHead*3+1] = pos.y;
+  inkPos[inkHead*3+2] = pos.z;
+  inkCol[inkHead*3]   = c.r;
+  inkCol[inkHead*3+1] = c.g;
+  inkCol[inkHead*3+2] = c.b;
+  inkHead++;
+  inkGeo.setDrawRange(0, inkHead);
+  inkGeo.attributes.position.needsUpdate = true;
+  inkGeo.attributes.color.needsUpdate    = true;
+}
+
+// ── Index lookup ─────────────────────────────────────────
+function indexForTime(ct) {
+  const dur = manifold.duration_s ?? times[times.length - 1] ?? 10;
+  const tt  = dur > 0 ? ct % dur : ct;
+  let lo = 0, hi = times.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] < tt) lo = mid + 1; else hi = mid;
+  }
+  const rawIdx = clamp(lo, 0, times.length - 1);
+  return Math.floor((rawIdx / times.length) * points.length);
+}
+
+// ── Audio ─────────────────────────────────────────────────
+const audio = new Audio(`./birds/${soundName}.mp3`);
+audio.loop  = true;
+
+audio.addEventListener('error', () => {
+  showError(`Audio file not found: birds/${soundName}.mp3`);
+});
+
+let started = false;
+let paused  = false;
+
+const overlay = document.getElementById('overlay');
+const playBtn = document.getElementById('playBtn');
+
+overlay.addEventListener('click', async () => {
+  try {
+    await audio.play();
+    overlay.classList.add('hidden');
+    setTimeout(() => overlay.style.display = 'none', 900);
+    playBtn.style.display = 'block';
+    started = true;
+  } catch (err) {
+    showError(`Could not play audio: ${err.message}`);
+  }
+}, { once: true });
+
+playBtn.addEventListener('click', async () => {
+  if (!paused) {
+    audio.pause(); paused = true; playBtn.textContent = 'Resume';
+  } else {
+    try {
+      await audio.play(); paused = false; playBtn.textContent = 'Pause';
+    } catch (err) {
+      showError(`Could not resume audio: ${err.message}`);
+    }
+  }
+});
+
+// ── Animate ───────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+
+  if (started && !paused) {
+    const i   = indexForTime(audio.currentTime);
+    const pos = points[i];
+    const ri  = Math.floor((i / points.length) * rawPts.length);
+    const e   = energy[ri] ?? 0;
+
+    dot.position.copy(pos);
+    dotMat.color = energyToColor(e);
+    const s = 1 + e * 2.0;
+    dot.scale.set(s, s, s);
+
+    pushTail(pos, e);
+    inkPath(i, e);
+  }
+
+  renderer.render(scene, camera);
+  css2d.render(scene, camera);
+}
+
+animate();
+
+// ── Resize ────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  css2d.setSize(innerWidth, innerHeight);
+});
