@@ -6,393 +6,340 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Spatiotemporal Acoustic Manifold</title>
 
-  <!-- Fonts: Instrument Serif (display) + Satoshi (UI chrome) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500&display=swap" rel="stylesheet">
+  <!-- Asimovian font (same as hulash.com) -->
+  <link rel="preload" href="https://hulash.com/_next/static/media/318a161632e2c969.p.0az.~-ean5ez_.woff2" as="font" crossorigin type="font/woff2">
 
   <style>
-    /* ── Reset & Base ─────────────────────────────────────────── */
+    /* ── Reset ──────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --font-display: 'Instrument Serif', Georgia, serif;
-      --font-ui:      'Satoshi', 'Helvetica Neue', sans-serif;
+      --bg:         #161616;
+      --text:       #DADADA;
+      --text-cream: #E3DACC;
+      --border:     rgba(255, 255, 240, 0.7);
+      --border-dim: rgba(255, 255, 240, 0.2);
+      --faint:      rgba(218, 218, 218, 0.35);
 
-      --clr-bg:       #050508;
-      --clr-surface:  rgba(8, 8, 14, 0.82);
-      --clr-border:   rgba(255, 255, 255, 0.07);
-      --clr-border-hi: rgba(255, 255, 255, 0.22);
-      --clr-text:     rgba(255, 255, 255, 0.85);
-      --clr-muted:    rgba(255, 255, 255, 0.35);
-      --clr-faint:    rgba(255, 255, 255, 0.14);
-      --clr-label:    rgba(255, 255, 255, 0.18);
+      --clr-teal:   #00c8aa;
+      --clr-amber:  rgba(255, 200, 80, 0.9);
+      --clr-r:      #ff4d4d;
+      --clr-g:      #44ff88;
+      --clr-b:      #4d88ff;
 
-      --clr-teal:     #00c8aa;
-      --clr-amber:    rgba(255, 200, 80, 0.9);
-      --clr-red-axis: #ff4d4d;
-      --clr-grn-axis: #44ff88;
-      --clr-blu-axis: #4d88ff;
-
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --ease-ui: cubic-bezier(0.16, 1, 0.3, 1);
+      --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     }
 
-    html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+    html { -webkit-font-smoothing: antialiased; }
 
     body {
-      background: var(--clr-bg);
-      color: var(--clr-text);
-      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
       overflow: hidden;
       height: 100dvh;
     }
 
     canvas { display: block; }
 
-    /* ── Shared glass card ─────────────────────────────────────── */
-    .glass {
-      background: var(--clr-surface);
-      backdrop-filter: blur(18px) saturate(140%);
-      -webkit-backdrop-filter: blur(18px) saturate(140%);
-      border: 1px solid var(--clr-border);
-      border-radius: var(--radius-md);
+    /* ── Shared border-box utility ──────────────────────────────── */
+    .box {
+      border: 1px solid var(--border);
     }
 
-    /* ── Section label ────────────────────────────────────────── */
-    .sec-label {
-      font-size: 8.5px;
-      font-weight: 500;
-      letter-spacing: 0.26em;
-      text-transform: uppercase;
-      color: var(--clr-label);
-      margin-bottom: 8px;
-    }
-
-    /* ── Divider ──────────────────────────────────────────────── */
-    .divider {
-      height: 1px;
-      background: var(--clr-border);
-      margin: 14px 0;
-    }
-
-    /* ══════════════════════════════════════════════════════════
-       OVERLAY
-    ══════════════════════════════════════════════════════════ */
+    /* ── OVERLAY ────────────────────────────────────────────────── */
     #overlay {
       position: fixed; inset: 0; z-index: 20;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      background: var(--clr-bg);
+      background: var(--bg);
       cursor: pointer;
-      transition: opacity 0.9s var(--ease-ui);
+      transition: opacity 0.8s ease;
       gap: 0;
     }
     #overlay.hidden { opacity: 0; pointer-events: none; }
 
     #overlay .ov-eyebrow {
-      font-family: var(--font-ui);
       font-size: 9px;
-      font-weight: 500;
-      letter-spacing: 0.38em;
+      font-weight: 700;
+      letter-spacing: 0.35em;
       text-transform: uppercase;
-      color: var(--clr-faint);
-      margin-bottom: 18px;
+      color: var(--faint);
+      margin-bottom: 20px;
     }
 
     #overlay h1 {
-      font-family: var(--font-display);
-      font-size: clamp(26px, 4.5vw, 52px);
-      font-weight: 400;
-      font-style: italic;
-      letter-spacing: -0.01em;
-      color: var(--clr-text);
+      font-size: clamp(22px, 4vw, 52px);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text);
       line-height: 1.1;
       text-align: center;
       margin-bottom: 10px;
     }
 
     #overlay .ov-sub {
-      font-family: var(--font-ui);
-      font-size: clamp(10px, 1.2vw, 12px);
-      font-weight: 300;
-      letter-spacing: 0.2em;
+      font-size: clamp(9px, 1.1vw, 11px);
+      font-weight: 400;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      color: var(--clr-muted);
+      color: var(--faint);
       margin-bottom: 52px;
     }
 
     .start-ring {
       width: 64px; height: 64px;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      border: 1px solid var(--border-dim);
       display: flex; align-items: center; justify-content: center;
-      transition: border-color 0.3s var(--ease-ui), transform 0.3s var(--ease-ui);
+      transition: border-color 0.2s ease;
     }
-    #overlay:hover .start-ring {
-      border-color: rgba(255, 255, 255, 0.55);
-      transform: scale(1.06);
-    }
-    .start-ring svg { width: 18px; height: 18px; fill: rgba(255,255,255,0.7); }
+    #overlay:hover .start-ring { border-color: var(--border); }
+    .start-ring svg { width: 16px; height: 16px; fill: var(--text); opacity: 0.7; }
 
     #overlay .ov-hint {
-      font-size: 8.5px;
+      font-size: 8px;
       font-weight: 400;
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: var(--clr-faint);
+      color: var(--faint);
       margin-top: 18px;
     }
 
-    /* ══════════════════════════════════════════════════════════
-       TOP-LEFT — Live species name
-    ══════════════════════════════════════════════════════════ */
-    #title {
-      position: fixed; top: 24px; left: 28px;
-      z-index: 10; pointer-events: none;
-    }
-    #titleSpecies {
-      font-family: var(--font-display);
-      font-style: italic;
-      font-size: clamp(15px, 2vw, 22px);
-      font-weight: 400;
-      color: rgba(255, 255, 255, 0.72);
-      letter-spacing: -0.01em;
-      transition: opacity 0.5s var(--ease-ui);
-    }
-    #title .title-meta {
-      font-family: var(--font-ui);
-      font-size: 8px;
-      font-weight: 400;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--clr-faint);
-      margin-top: 5px;
+    /* ── TOP NAV BAR ────────────────────────────────────────────── */
+    #topbar {
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: 48px 1fr 48px;
+      border: 1px solid var(--border);
+      height: 48px;
+      pointer-events: none;
     }
 
-    /* ══════════════════════════════════════════════════════════
-       BOTTOM CENTRE — label + play button
-    ══════════════════════════════════════════════════════════ */
+    #topbar .tb-logo {
+      border-right: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+    }
+    #topbar .tb-logo span {
+      font-size: 13px; font-weight: 700;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      color: var(--text);
+    }
+
+    #topbar .tb-title {
+      display: flex; align-items: center; justify-content: center;
+      border-right: 1px solid var(--border);
+      padding: 0 16px; overflow: hidden;
+    }
+    #topbar .tb-title h2 {
+      font-size: clamp(9px, 1.4vw, 13px);
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #topbar .tb-title .tb-meta {
+      font-size: 8px; font-weight: 400;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--faint); margin-left: 16px;
+      white-space: nowrap;
+    }
+
+    #topbar .tb-right {
+      display: flex; align-items: center; justify-content: center;
+    }
+    #playBtn {
+      background: none; border: none;
+      color: var(--faint);
+      font-size: 8px; font-weight: 700;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      cursor: pointer; pointer-events: all;
+      transition: color 0.2s;
+      display: none; padding: 0 8px;
+    }
+    #playBtn:hover { color: var(--text); }
+
+    /* ── SIDE PANEL ─────────────────────────────────────────────── */
+    #side-panel {
+      position: fixed; bottom: 12px; left: 12px;
+      z-index: 10; width: 220px;
+      border: 1px solid var(--border);
+    }
+
+    .panel-row {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-row:last-child { border-bottom: none; }
+
+    .sec-label {
+      font-size: 7.5px;
+      font-weight: 700;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--faint);
+      margin-bottom: 8px;
+    }
+
+    /* Species selector */
+    #species-select-wrap { position: relative; }
+    #speciesSelect {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border-dim);
+      color: var(--text-cream);
+      font-family: var(--font);
+      font-size: 9px; font-weight: 700;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      padding: 7px 24px 7px 10px;
+      appearance: none; cursor: pointer; outline: none;
+      transition: border-color 0.15s;
+    }
+    #speciesSelect:hover, #speciesSelect:focus {
+      border-color: var(--border);
+    }
+    #speciesSelect option {
+      background: #1e1e1e;
+      color: var(--text);
+      font-size: 11px;
+    }
+    #species-select-wrap::after {
+      content: '';
+      position: absolute; right: 10px; top: 50%;
+      transform: translateY(-50%);
+      width: 0; height: 0;
+      border-left: 3px solid transparent;
+      border-right: 3px solid transparent;
+      border-top: 3px solid var(--faint);
+      pointer-events: none;
+    }
+
+    /* Manifold legend */
+    #manifold-legend { display: none; }
+    #manifold-legend.visible { display: block; }
+    .ml-row {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 8px; font-weight: 700;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--faint); line-height: 2.2;
+    }
+    .ml-dot {
+      width: 6px; height: 6px;
+      flex-shrink: 0;
+    }
+
+    /* Dropzone */
+    #dropzone {
+      border: 1px solid var(--border-dim);
+      padding: 12px 10px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s;
+    }
+    #dropzone:hover, #dropzone.drag-over {
+      border-color: var(--border);
+    }
+    #dropzone .dz-icon { font-size: 16px; opacity: 0.25; margin-bottom: 5px; }
+    #dropzone .dz-title {
+      font-size: 8px; font-weight: 700;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--faint); margin-bottom: 3px;
+    }
+    #dropzone .dz-hint {
+      font-size: 7px; font-weight: 400;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: rgba(218,218,218,0.2);
+    }
+    #upload-progress-bg {
+      height: 1px; background: var(--border-dim);
+      margin-top: 9px; overflow: hidden;
+    }
+    #upload-progress-bar {
+      height: 100%; width: 0%;
+      background: var(--text);
+      transition: width 0.35s ease, opacity 0.35s;
+      opacity: 0;
+    }
+    #upload-status {
+      font-size: 7.5px; font-weight: 400;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--faint); margin-top: 7px;
+      min-height: 13px; line-height: 1.5;
+    }
+    #mode-badge {
+      font-size: 7.5px; font-weight: 400;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--faint); margin-top: 4px;
+    }
+
+    /* ── LEGEND (bottom-right) ──────────────────────────────────── */
+    #legend {
+      position: fixed; bottom: 12px; right: 12px;
+      z-index: 10; pointer-events: none;
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+    }
+    .lg-section { margin-bottom: 10px; }
+    .lg-section:last-child { margin-bottom: 0; }
+    .lg-head {
+      font-size: 7px; font-weight: 700;
+      letter-spacing: 0.3em; text-transform: uppercase;
+      color: var(--faint); margin-bottom: 5px;
+    }
+    .lg-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 8px; font-weight: 400;
+      letter-spacing: 0.13em; text-transform: uppercase;
+      color: var(--text-cream); line-height: 2;
+    }
+    .swatch {
+      width: 6px; height: 6px; flex-shrink: 0;
+    }
+    .axis-tick {
+      width: 12px; height: 1.5px;
+      flex-shrink: 0;
+    }
+
+    /* ── BOTTOM CENTRE ──────────────────────────────────────────── */
     #ui {
       position: fixed; bottom: 26px; left: 50%;
       transform: translateX(-50%); z-index: 10;
       display: flex; align-items: center; gap: 16px;
     }
     #label {
-      font-family: var(--font-ui);
-      font-size: 8.5px; font-weight: 400;
+      font-size: 8px; font-weight: 700;
       letter-spacing: 0.22em; text-transform: uppercase;
-      color: var(--clr-faint); pointer-events: none;
-    }
-    #playBtn {
-      background: none;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: var(--clr-muted);
-      border-radius: 20px;
-      padding: 5px 20px;
-      font-family: var(--font-ui);
-      font-size: 8.5px; font-weight: 400;
-      letter-spacing: 0.22em; text-transform: uppercase;
-      cursor: pointer;
-      transition: border-color 0.2s, color 0.2s;
-      display: none;
-    }
-    #playBtn:hover { border-color: rgba(255,255,255,0.45); color: var(--clr-text); }
-
-    /* ══════════════════════════════════════════════════════════
-       SIDE PANEL
-    ══════════════════════════════════════════════════════════ */
-    #side-panel {
-      position: fixed; bottom: 72px; left: 24px;
-      z-index: 10; width: 228px;
+      color: var(--faint); pointer-events: none;
     }
 
-    .panel-card {
-      padding: 16px 16px 14px;
-    }
-
-    /* Species selector */
-    #species-select-wrap { position: relative; }
-    #species-select-wrap::before {
-      content: '›';
-      position: absolute; left: 11px; top: 50%;
-      transform: translateY(-50%);
-      font-size: 13px; line-height: 1;
-      color: rgba(255,255,255,0.2);
-      pointer-events: none; z-index: 1;
-    }
-    #speciesSelect {
-      width: 100%;
-      background: rgba(0, 0, 0, 0.45);
-      border: 1px solid var(--clr-border);
-      border-radius: var(--radius-sm);
-      color: rgba(255, 255, 255, 0.6);
-      font-family: var(--font-ui);
-      font-size: 9px; font-weight: 400;
-      letter-spacing: 0.18em; text-transform: uppercase;
-      padding: 8px 28px 8px 26px;
-      appearance: none; cursor: pointer; outline: none;
-      transition: border-color 0.2s var(--ease-ui), color 0.2s;
-    }
-    #speciesSelect:hover, #speciesSelect:focus {
-      border-color: rgba(255,255,255,0.25);
-      color: rgba(255,255,255,0.9);
-    }
-    #speciesSelect option {
-      background: #0d0d14;
-      color: rgba(255,255,255,0.75);
-      font-size: 11px;
-    }
-    #species-select-wrap::after {
-      content: '';
-      position: absolute; right: 11px; top: 50%;
-      transform: translateY(-50%);
-      width: 0; height: 0;
-      border-left: 3.5px solid transparent;
-      border-right: 3.5px solid transparent;
-      border-top: 3.5px solid rgba(255,255,255,0.2);
-      pointer-events: none;
-    }
-
-    /* Manifold legend dots */
-    #manifold-legend {
-      display: none;
-      flex-direction: column;
-      gap: 5px;
-    }
-    #manifold-legend.visible { display: flex; }
-    .ml-row {
-      display: flex; align-items: center; gap: 9px;
-      font-size: 8.5px; font-weight: 400;
-      letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--clr-muted);
-    }
-    .ml-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%; flex-shrink: 0;
-    }
-
-    /* Upload dropzone */
-    #dropzone {
-      border: 1px solid var(--clr-border);
-      border-radius: var(--radius-sm);
-      padding: 13px 12px;
-      cursor: pointer;
-      background: rgba(0,0,0,0.3);
-      text-align: center;
-      transition: border-color 0.2s var(--ease-ui), background 0.2s;
-    }
-    #dropzone:hover, #dropzone.drag-over {
-      border-color: rgba(255,255,255,0.24);
-      background: rgba(10,10,20,0.7);
-    }
-    #dropzone .dz-icon {
-      font-size: 17px; margin-bottom: 6px;
-      opacity: 0.28; line-height: 1;
-    }
-    #dropzone .dz-title {
-      font-size: 8.5px; font-weight: 500;
-      letter-spacing: 0.2em; text-transform: uppercase;
-      color: rgba(255,255,255,0.4);
-      margin-bottom: 3px;
-    }
-    #dropzone .dz-hint {
-      font-size: 7.5px; font-weight: 400;
-      letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--clr-faint);
-    }
-
-    /* Progress bar */
-    #upload-progress-bg {
-      height: 1px;
-      background: rgba(255,255,255,0.05);
-      margin-top: 9px;
-      border-radius: 1px;
-      overflow: hidden;
-    }
-    #upload-progress-bar {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, var(--clr-teal), var(--clr-amber));
-      transition: width 0.35s var(--ease-ui), opacity 0.35s;
-      opacity: 0;
-    }
-
-    /* Status */
-    #upload-status {
-      font-size: 8px; font-weight: 400;
-      letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--clr-faint);
-      margin-top: 7px; min-height: 13px; line-height: 1.5;
-    }
-    #mode-badge {
-      font-size: 8px; font-weight: 400;
-      letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--clr-faint); margin-top: 5px;
-    }
-
-    /* ══════════════════════════════════════════════════════════
-       TOP-RIGHT LEGEND
-    ══════════════════════════════════════════════════════════ */
-    #legend {
-      position: fixed; top: 24px; right: 24px; z-index: 10;
-      pointer-events: none;
-      padding: 14px 16px 12px;
-    }
-    #legend .lg-section {
-      margin-bottom: 10px;
-    }
-    #legend .lg-section:last-child { margin-bottom: 0; }
-    #legend .lg-head {
-      font-size: 7.5px; font-weight: 500;
-      letter-spacing: 0.28em; text-transform: uppercase;
-      color: var(--clr-faint); margin-bottom: 6px;
-    }
-    #legend .lg-row {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 8.5px; font-weight: 400;
-      letter-spacing: 0.13em; text-transform: uppercase;
-      color: var(--clr-muted); line-height: 2;
-    }
-    .swatch {
-      width: 7px; height: 7px;
-      border-radius: 50%; flex-shrink: 0;
-    }
-    .axis-tick {
-      width: 14px; height: 1.5px;
-      border-radius: 1px; flex-shrink: 0;
-    }
-
-    /* ══════════════════════════════════════════════════════════
-       ERROR STATE
-    ══════════════════════════════════════════════════════════ */
+    /* ── ERROR ──────────────────────────────────────────────────── */
     #error-state {
       display: none; position: fixed; inset: 0; z-index: 30;
       flex-direction: column; align-items: center; justify-content: center;
-      background: var(--clr-bg); gap: 14px;
+      background: var(--bg); gap: 14px;
     }
-    #error-state .error-icon { font-size: 26px; opacity: 0.35; }
+    #error-state .error-icon { font-size: 24px; opacity: 0.35; }
     #error-state .error-msg {
-      font-family: var(--font-ui);
-      font-size: clamp(11px, 1.4vw, 13px);
-      letter-spacing: 0.14em; text-transform: uppercase;
+      font-size: clamp(10px, 1.3vw, 12px);
+      font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
       color: rgba(255, 100, 80, 0.75);
       max-width: 440px; text-align: center; line-height: 2;
     }
     #error-state .error-hint {
-      font-size: 9.5px; letter-spacing: 0.1em;
-      text-transform: uppercase; color: var(--clr-faint);
+      font-size: 9px; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--faint);
     }
 
-    /* ══════════════════════════════════════════════════════════
-       MOBILE
-    ══════════════════════════════════════════════════════════ */
+    /* ── MOBILE ─────────────────────────────────────────────────── */
     @media (max-width: 600px) {
-      #side-panel { left: 14px; right: 14px; width: auto; bottom: 60px; }
+      #side-panel { left: 8px; right: 8px; width: auto; bottom: 56px; }
       #legend { display: none; }
-      #title .title-meta { display: none; }
-      #titleSpecies { font-size: 14px; }
+      #topbar { top: 8px; left: 8px; right: 8px; }
+      .tb-meta { display: none; }
     }
   </style>
 </head>
@@ -406,7 +353,7 @@
     <div class="error-hint">Check the console for details</div>
   </div>
 
-  <!-- Overlay / splash -->
+  <!-- Overlay -->
   <div id="overlay">
     <div class="ov-eyebrow">Birdsong &middot; Acoustic Analysis</div>
     <h1>Spatiotemporal<br>Acoustic Manifold</h1>
@@ -414,28 +361,33 @@
     <div class="start-ring">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
     </div>
-    <p class="ov-hint">Click to begin &middot; select a species or upload your own audio</p>
+    <p class="ov-hint">Click to begin &middot; select a species or upload audio</p>
   </div>
 
-  <!-- Top-left: live species name -->
-  <div id="title">
-    <div id="titleSpecies">&#8212;</div>
-    <div class="title-meta">MFCC &middot; PCA &middot; 3D Trajectory</div>
+  <!-- Top nav bar -->
+  <div id="topbar">
+    <div class="tb-logo"><span>&#9835;</span></div>
+    <div class="tb-title">
+      <h2 id="titleSpecies">&#8212;</h2>
+      <span class="tb-meta">MFCC &middot; PCA &middot; 3D</span>
+    </div>
+    <div class="tb-right">
+      <button id="playBtn" type="button">Pause</button>
+    </div>
   </div>
 
-  <!-- Bottom centre: status label + play/pause -->
+  <!-- Bottom centre label -->
   <div id="ui">
     <span id="label">Spatiotemporal Acoustic Manifold</span>
-    <button id="playBtn" type="button">Pause</button>
   </div>
 
-  <!-- Top-right: legend -->
-  <div id="legend" class="glass" aria-label="Colour and size encoding">
+  <!-- Legend bottom-right -->
+  <div id="legend" aria-label="Colour and size encoding">
     <div class="lg-section">
       <div class="lg-head">Colour &middot; Energy</div>
       <div class="lg-row"><span class="swatch" style="background:#3a6fff"></span>Silence</div>
       <div class="lg-row"><span class="swatch" style="background:#00e5aa"></span>Mid</div>
-      <div class="lg-row"><span class="swatch" style="background:#ff6a00"></span>Peak call</div>
+      <div class="lg-row"><span class="swatch" style="background:#ff6a00"></span>Peak</div>
     </div>
     <div class="lg-section">
       <div class="lg-head">Size &middot; Amplitude</div>
@@ -443,27 +395,23 @@
     </div>
     <div class="lg-section">
       <div class="lg-head">Axes</div>
-      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-red-axis)"></span>PC1 Timbre</div>
-      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-grn-axis)"></span>PC2 Texture</div>
-      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-blu-axis)"></span>PC3 Spectral</div>
+      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-r)"></span>PC1 Timbre</div>
+      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-g)"></span>PC2 Texture</div>
+      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-b)"></span>PC3 Spectral</div>
     </div>
   </div>
 
-  <!-- Side panel: species + upload -->
-  <div id="side-panel">
-    <div class="glass panel-card">
+  <!-- Side panel -->
+  <div id="side-panel" class="box">
 
-      <!-- Species selector -->
+    <div class="panel-row">
       <div class="sec-label">Species</div>
       <div id="species-select-wrap">
         <select id="speciesSelect" aria-label="Select bird species">
           <option value="">Loading...</option>
         </select>
       </div>
-
-      <!-- Manifold legend (shown when upload active) -->
-      <div id="manifold-legend">
-        <div class="divider"></div>
+      <div id="manifold-legend" style="margin-top:10px;">
         <div class="ml-row">
           <span class="ml-dot" id="dot-primary" style="background:var(--clr-teal)"></span>
           <span id="legend-primary">&#8212;</span>
@@ -473,11 +421,10 @@
           <span id="legend-secondary">Uploaded</span>
         </div>
       </div>
+    </div>
 
-      <div class="divider"></div>
-
-      <!-- Upload -->
-      <div class="sec-label">Upload your audio</div>
+    <div class="panel-row">
+      <div class="sec-label">Upload Audio</div>
       <div id="dropzone" role="button" aria-label="Upload audio file" tabindex="0">
         <div class="dz-icon">&#127925;</div>
         <div class="dz-title">Drop or click to upload</div>
@@ -488,8 +435,8 @@
       </div>
       <div id="upload-status"></div>
       <div id="mode-badge"></div>
-
     </div>
+
   </div>
 
   <input type="file" id="audioFileInput" accept="audio/*" style="display:none" />
