@@ -6,27 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Spatiotemporal Acoustic Manifold</title>
 
-  <!-- Asimovian font (same as hulash.com) -->
-  <link rel="preload" href="https://hulash.com/_next/static/media/318a161632e2c969.p.0az.~-ean5ez_.woff2" as="font" crossorigin type="font/woff2">
-
   <style>
-    /* ── Reset ──────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:         #161616;
+      --bg:         #0e0e0e;
       --text:       #DADADA;
       --text-cream: #E3DACC;
       --border:     rgba(255, 255, 240, 0.7);
-      --border-dim: rgba(255, 255, 240, 0.2);
-      --faint:      rgba(218, 218, 218, 0.35);
-
-      --clr-teal:   #00c8aa;
-      --clr-amber:  rgba(255, 200, 80, 0.9);
-      --clr-r:      #ff4d4d;
-      --clr-g:      #44ff88;
-      --clr-b:      #4d88ff;
-
+      --border-dim: rgba(255, 255, 240, 0.18);
+      --faint:      rgba(218, 218, 218, 0.32);
       --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     }
 
@@ -42,217 +31,168 @@
 
     canvas { display: block; }
 
-    /* ── Shared border-box utility ──────────────────────────────── */
-    .box {
-      border: 1px solid var(--border);
-    }
-
-    /* ── OVERLAY ────────────────────────────────────────────────── */
+    /* ── OVERLAY ──────────────────────────────────────────── */
     #overlay {
       position: fixed; inset: 0; z-index: 20;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       background: var(--bg);
       cursor: pointer;
-      transition: opacity 0.8s ease;
-      gap: 0;
+      transition: opacity 0.9s ease;
     }
     #overlay.hidden { opacity: 0; pointer-events: none; }
 
     #overlay .ov-eyebrow {
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.35em;
-      text-transform: uppercase;
-      color: var(--faint);
-      margin-bottom: 20px;
+      font-size: 8.5px; font-weight: 700;
+      letter-spacing: 0.38em; text-transform: uppercase;
+      color: var(--faint); margin-bottom: 20px;
     }
-
     #overlay h1 {
-      font-size: clamp(22px, 4vw, 52px);
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text);
-      line-height: 1.1;
-      text-align: center;
+      font-size: clamp(20px, 3.8vw, 48px);
+      font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text);
+      line-height: 1.1; text-align: center;
       margin-bottom: 10px;
     }
-
     #overlay .ov-sub {
-      font-size: clamp(9px, 1.1vw, 11px);
-      font-weight: 400;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: var(--faint);
-      margin-bottom: 52px;
+      font-size: clamp(8px, 1vw, 10px); font-weight: 400;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--faint); margin-bottom: 52px;
     }
-
     .start-ring {
-      width: 64px; height: 64px;
+      width: 60px; height: 60px;
       border: 1px solid var(--border-dim);
       display: flex; align-items: center; justify-content: center;
-      transition: border-color 0.2s ease;
+      transition: border-color 0.2s;
     }
     #overlay:hover .start-ring { border-color: var(--border); }
-    .start-ring svg { width: 16px; height: 16px; fill: var(--text); opacity: 0.7; }
-
+    .start-ring svg { width: 15px; height: 15px; fill: var(--text); opacity: 0.65; }
     #overlay .ov-hint {
-      font-size: 8px;
-      font-weight: 400;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--faint);
-      margin-top: 18px;
+      font-size: 8px; font-weight: 400; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--faint); margin-top: 18px;
     }
 
-    /* ── TOP NAV BAR ────────────────────────────────────────────── */
+    /* ── TOP NAV BAR ─────────────────────────────────────── */
     #topbar {
       position: fixed; top: 12px; left: 12px; right: 12px;
       z-index: 10;
       display: grid;
-      grid-template-columns: 48px 1fr 48px;
+      grid-template-columns: 48px 1fr 80px;
       border: 1px solid var(--border);
       height: 48px;
+      /* pointer-events off on container — children opt-in */
       pointer-events: none;
     }
-
     #topbar .tb-logo {
       border-right: 1px solid var(--border);
       display: flex; align-items: center; justify-content: center;
     }
     #topbar .tb-logo span {
-      font-size: 13px; font-weight: 700;
-      letter-spacing: 0.05em; text-transform: uppercase;
-      color: var(--text);
+      font-size: 14px; font-weight: 700;
+      letter-spacing: 0.04em; color: var(--text);
     }
-
     #topbar .tb-title {
-      display: flex; align-items: center; justify-content: center;
+      display: flex; align-items: center;
+      gap: 14px; padding: 0 18px;
       border-right: 1px solid var(--border);
-      padding: 0 16px; overflow: hidden;
+      overflow: hidden;
     }
     #topbar .tb-title h2 {
-      font-size: clamp(9px, 1.4vw, 13px);
-      font-weight: 700;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: var(--text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: clamp(9px, 1.3vw, 12px); font-weight: 700;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--text); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
     }
-    #topbar .tb-title .tb-meta {
+    #topbar .tb-meta {
       font-size: 8px; font-weight: 400;
       letter-spacing: 0.16em; text-transform: uppercase;
-      color: var(--faint); margin-left: 16px;
-      white-space: nowrap;
+      color: var(--faint); white-space: nowrap; flex-shrink: 0;
     }
-
     #topbar .tb-right {
       display: flex; align-items: center; justify-content: center;
+      /* THIS cell is interactive */
+      pointer-events: all;
     }
     #playBtn {
       background: none; border: none;
       color: var(--faint);
+      font-family: var(--font);
       font-size: 8px; font-weight: 700;
-      letter-spacing: 0.22em; text-transform: uppercase;
-      cursor: pointer; pointer-events: all;
+      letter-spacing: 0.24em; text-transform: uppercase;
+      cursor: pointer;
+      padding: 0 12px; height: 100%;
+      width: 100%;
       transition: color 0.2s;
-      display: none; padding: 0 8px;
+      display: none;
     }
     #playBtn:hover { color: var(--text); }
 
-    /* ── SIDE PANEL ─────────────────────────────────────────────── */
+    /* ── SIDE PANEL ──────────────────────────────────────── */
     #side-panel {
       position: fixed; bottom: 12px; left: 12px;
-      z-index: 10; width: 220px;
+      z-index: 10; width: 216px;
       border: 1px solid var(--border);
     }
-
     .panel-row {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--border-dim);
     }
     .panel-row:last-child { border-bottom: none; }
-
     .sec-label {
-      font-size: 7.5px;
-      font-weight: 700;
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      color: var(--faint);
-      margin-bottom: 8px;
+      font-size: 7.5px; font-weight: 700;
+      letter-spacing: 0.3em; text-transform: uppercase;
+      color: var(--faint); margin-bottom: 8px;
     }
 
     /* Species selector */
     #species-select-wrap { position: relative; }
     #speciesSelect {
-      width: 100%;
-      background: var(--bg);
+      width: 100%; background: var(--bg);
       border: 1px solid var(--border-dim);
-      color: var(--text-cream);
-      font-family: var(--font);
+      color: var(--text-cream); font-family: var(--font);
       font-size: 9px; font-weight: 700;
       letter-spacing: 0.18em; text-transform: uppercase;
-      padding: 7px 24px 7px 10px;
+      padding: 7px 22px 7px 10px;
       appearance: none; cursor: pointer; outline: none;
       transition: border-color 0.15s;
     }
-    #speciesSelect:hover, #speciesSelect:focus {
-      border-color: var(--border);
-    }
-    #speciesSelect option {
-      background: #1e1e1e;
-      color: var(--text);
-      font-size: 11px;
-    }
+    #speciesSelect:hover, #speciesSelect:focus { border-color: var(--border); }
+    #speciesSelect option { background: #1a1a1a; color: var(--text); font-size: 11px; }
     #species-select-wrap::after {
-      content: '';
-      position: absolute; right: 10px; top: 50%;
+      content: ''; position: absolute; right: 9px; top: 50%;
       transform: translateY(-50%);
       width: 0; height: 0;
-      border-left: 3px solid transparent;
-      border-right: 3px solid transparent;
-      border-top: 3px solid var(--faint);
-      pointer-events: none;
+      border-left: 3px solid transparent; border-right: 3px solid transparent;
+      border-top: 3px solid var(--faint); pointer-events: none;
     }
 
     /* Manifold legend */
-    #manifold-legend { display: none; }
+    #manifold-legend { display: none; margin-top: 10px; }
     #manifold-legend.visible { display: block; }
     .ml-row {
-      display: flex; align-items: center; gap: 9px;
+      display: flex; align-items: center; gap: 8px;
       font-size: 8px; font-weight: 700;
-      letter-spacing: 0.16em; text-transform: uppercase;
+      letter-spacing: 0.15em; text-transform: uppercase;
       color: var(--faint); line-height: 2.2;
     }
-    .ml-dot {
-      width: 6px; height: 6px;
-      flex-shrink: 0;
-    }
+    .ml-dot { width: 5px; height: 5px; flex-shrink: 0; }
 
     /* Dropzone */
     #dropzone {
       border: 1px solid var(--border-dim);
-      padding: 12px 10px;
-      cursor: pointer;
-      text-align: center;
+      padding: 12px 10px; cursor: pointer; text-align: center;
       transition: border-color 0.15s;
     }
-    #dropzone:hover, #dropzone.drag-over {
-      border-color: var(--border);
-    }
-    #dropzone .dz-icon { font-size: 16px; opacity: 0.25; margin-bottom: 5px; }
+    #dropzone:hover, #dropzone.drag-over { border-color: var(--border); }
+    #dropzone .dz-icon { font-size: 15px; opacity: 0.22; margin-bottom: 5px; }
     #dropzone .dz-title {
       font-size: 8px; font-weight: 700;
       letter-spacing: 0.22em; text-transform: uppercase;
       color: var(--faint); margin-bottom: 3px;
     }
     #dropzone .dz-hint {
-      font-size: 7px; font-weight: 400;
-      letter-spacing: 0.12em; text-transform: uppercase;
-      color: rgba(218,218,218,0.2);
+      font-size: 7px; font-weight: 400; letter-spacing: 0.12em;
+      text-transform: uppercase; color: rgba(218,218,218,0.18);
     }
     #upload-progress-bg {
       height: 1px; background: var(--border-dim);
@@ -260,23 +200,20 @@
     }
     #upload-progress-bar {
       height: 100%; width: 0%;
-      background: var(--text);
-      transition: width 0.35s ease, opacity 0.35s;
-      opacity: 0;
+      background: var(--text-cream);
+      transition: width 0.35s ease, opacity 0.35s; opacity: 0;
     }
     #upload-status {
-      font-size: 7.5px; font-weight: 400;
-      letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--faint); margin-top: 7px;
-      min-height: 13px; line-height: 1.5;
+      font-size: 7.5px; font-weight: 400; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--faint);
+      margin-top: 7px; min-height: 12px; line-height: 1.5;
     }
     #mode-badge {
-      font-size: 7.5px; font-weight: 400;
-      letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--faint); margin-top: 4px;
+      font-size: 7.5px; font-weight: 400; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--faint); margin-top: 4px;
     }
 
-    /* ── LEGEND (bottom-right) ──────────────────────────────────── */
+    /* ── LEGEND bottom-right ─────────────────────────────── */
     #legend {
       position: fixed; bottom: 12px; right: 12px;
       z-index: 10; pointer-events: none;
@@ -286,37 +223,29 @@
     .lg-section { margin-bottom: 10px; }
     .lg-section:last-child { margin-bottom: 0; }
     .lg-head {
-      font-size: 7px; font-weight: 700;
-      letter-spacing: 0.3em; text-transform: uppercase;
-      color: var(--faint); margin-bottom: 5px;
+      font-size: 7px; font-weight: 700; letter-spacing: 0.3em;
+      text-transform: uppercase; color: var(--faint); margin-bottom: 5px;
     }
     .lg-row {
       display: flex; align-items: center; gap: 8px;
-      font-size: 8px; font-weight: 400;
-      letter-spacing: 0.13em; text-transform: uppercase;
-      color: var(--text-cream); line-height: 2;
+      font-size: 8px; font-weight: 400; letter-spacing: 0.13em;
+      text-transform: uppercase; color: var(--text-cream); line-height: 2;
     }
-    .swatch {
-      width: 6px; height: 6px; flex-shrink: 0;
-    }
-    .axis-tick {
-      width: 12px; height: 1.5px;
-      flex-shrink: 0;
-    }
+    .swatch { width: 6px; height: 6px; flex-shrink: 0; }
+    .axis-tick { width: 12px; height: 1.5px; flex-shrink: 0; }
 
-    /* ── BOTTOM CENTRE ──────────────────────────────────────────── */
+    /* ── BOTTOM CENTRE ───────────────────────────────────── */
     #ui {
-      position: fixed; bottom: 26px; left: 50%;
+      position: fixed; bottom: 24px; left: 50%;
       transform: translateX(-50%); z-index: 10;
-      display: flex; align-items: center; gap: 16px;
+      pointer-events: none;
     }
     #label {
-      font-size: 8px; font-weight: 700;
-      letter-spacing: 0.22em; text-transform: uppercase;
-      color: var(--faint); pointer-events: none;
+      font-size: 8px; font-weight: 700; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--faint);
     }
 
-    /* ── ERROR ──────────────────────────────────────────────────── */
+    /* ── ERROR ───────────────────────────────────────────── */
     #error-state {
       display: none; position: fixed; inset: 0; z-index: 30;
       flex-direction: column; align-items: center; justify-content: center;
@@ -324,9 +253,9 @@
     }
     #error-state .error-icon { font-size: 24px; opacity: 0.35; }
     #error-state .error-msg {
-      font-size: clamp(10px, 1.3vw, 12px);
-      font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
-      color: rgba(255, 100, 80, 0.75);
+      font-size: clamp(10px, 1.3vw, 12px); font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: rgba(255,100,80,0.75);
       max-width: 440px; text-align: center; line-height: 2;
     }
     #error-state .error-hint {
@@ -334,9 +263,9 @@
       text-transform: uppercase; color: var(--faint);
     }
 
-    /* ── MOBILE ─────────────────────────────────────────────────── */
+    /* ── MOBILE ──────────────────────────────────────────── */
     @media (max-width: 600px) {
-      #side-panel { left: 8px; right: 8px; width: auto; bottom: 56px; }
+      #side-panel { left: 8px; right: 8px; width: auto; bottom: 54px; }
       #legend { display: none; }
       #topbar { top: 8px; left: 8px; right: 8px; }
       .tb-meta { display: none; }
@@ -346,14 +275,12 @@
 
 <body>
 
-  <!-- Error -->
   <div id="error-state" role="alert">
     <div class="error-icon">&#9888;</div>
     <div class="error-msg"></div>
     <div class="error-hint">Check the console for details</div>
   </div>
 
-  <!-- Overlay -->
   <div id="overlay">
     <div class="ov-eyebrow">Birdsong &middot; Acoustic Analysis</div>
     <h1>Spatiotemporal<br>Acoustic Manifold</h1>
@@ -364,7 +291,6 @@
     <p class="ov-hint">Click to begin &middot; select a species or upload audio</p>
   </div>
 
-  <!-- Top nav bar -->
   <div id="topbar">
     <div class="tb-logo"><span>&#9835;</span></div>
     <div class="tb-title">
@@ -376,18 +302,14 @@
     </div>
   </div>
 
-  <!-- Bottom centre label -->
-  <div id="ui">
-    <span id="label">Spatiotemporal Acoustic Manifold</span>
-  </div>
+  <div id="ui"><span id="label">Spatiotemporal Acoustic Manifold</span></div>
 
-  <!-- Legend bottom-right -->
-  <div id="legend" aria-label="Colour and size encoding">
+  <div id="legend" aria-label="Encoding legend">
     <div class="lg-section">
       <div class="lg-head">Colour &middot; Energy</div>
-      <div class="lg-row"><span class="swatch" style="background:#3a6fff"></span>Silence</div>
-      <div class="lg-row"><span class="swatch" style="background:#00e5aa"></span>Mid</div>
-      <div class="lg-row"><span class="swatch" style="background:#ff6a00"></span>Peak</div>
+      <div class="lg-row"><span class="swatch" style="background:#4466cc"></span>Silence</div>
+      <div class="lg-row"><span class="swatch" style="background:#c8c8c8"></span>Mid</div>
+      <div class="lg-row"><span class="swatch" style="background:#e8d8b0"></span>Peak</div>
     </div>
     <div class="lg-section">
       <div class="lg-head">Size &middot; Amplitude</div>
@@ -395,15 +317,13 @@
     </div>
     <div class="lg-section">
       <div class="lg-head">Axes</div>
-      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-r)"></span>PC1 Timbre</div>
-      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-g)"></span>PC2 Texture</div>
-      <div class="lg-row"><span class="axis-tick" style="background:var(--clr-b)"></span>PC3 Spectral</div>
+      <div class="lg-row"><span class="axis-tick" style="background:#cc4444"></span>PC1 Timbre</div>
+      <div class="lg-row"><span class="axis-tick" style="background:#44bb66"></span>PC2 Texture</div>
+      <div class="lg-row"><span class="axis-tick" style="background:#4477cc"></span>PC3 Spectral</div>
     </div>
   </div>
 
-  <!-- Side panel -->
-  <div id="side-panel" class="box">
-
+  <div id="side-panel">
     <div class="panel-row">
       <div class="sec-label">Species</div>
       <div id="species-select-wrap">
@@ -411,18 +331,17 @@
           <option value="">Loading...</option>
         </select>
       </div>
-      <div id="manifold-legend" style="margin-top:10px;">
+      <div id="manifold-legend">
         <div class="ml-row">
-          <span class="ml-dot" id="dot-primary" style="background:var(--clr-teal)"></span>
+          <span class="ml-dot" id="dot-primary" style="background:#c8c8c8"></span>
           <span id="legend-primary">&#8212;</span>
         </div>
         <div class="ml-row">
-          <span class="ml-dot" id="dot-secondary" style="background:var(--clr-amber)"></span>
+          <span class="ml-dot" id="dot-secondary" style="background:#e8c870"></span>
           <span id="legend-secondary">Uploaded</span>
         </div>
       </div>
     </div>
-
     <div class="panel-row">
       <div class="sec-label">Upload Audio</div>
       <div id="dropzone" role="button" aria-label="Upload audio file" tabindex="0">
@@ -430,13 +349,10 @@
         <div class="dz-title">Drop or click to upload</div>
         <div class="dz-hint">mp3 &middot; wav &middot; ogg &middot; flac</div>
       </div>
-      <div id="upload-progress-bg">
-        <div id="upload-progress-bar"></div>
-      </div>
+      <div id="upload-progress-bg"><div id="upload-progress-bar"></div></div>
       <div id="upload-status"></div>
       <div id="mode-badge"></div>
     </div>
-
   </div>
 
   <input type="file" id="audioFileInput" accept="audio/*" style="display:none" />
@@ -447,8 +363,6 @@
       "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
     }}
   </script>
-
   <script type="module" src="./src/main.js"></script>
 </body>
-
 </html>
