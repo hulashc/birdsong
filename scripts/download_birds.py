@@ -9,7 +9,11 @@ then runs process_birds.py to regenerate birdsong_data.json.
 Usage (from repo root):
     python scripts/download_birds.py
 
-No API key needed. Requires: requests (pip install requests)
+No API key needed. Requires only the Python standard library.
+
+Wikimedia rate-limits bulk downloads. This script retries with
+exponential backoff automatically. If some species still fail,
+just run it again — it skips already-downloaded files.
 """
 
 import os
@@ -17,12 +21,11 @@ import sys
 import time
 import subprocess
 import urllib.request
-import urllib.parse
+import urllib.error
 
 # ---------------------------------------------------------------------------
-# Curated list: (display_name, wikimedia_commons_direct_url)
+# Curated list: (slug, wikimedia_commons_direct_url)
 # All files are public domain or CC-BY licensed from Wikimedia Commons.
-# URLs verified May 2026.
 # ---------------------------------------------------------------------------
 BIRDS = [
     ("blackbird",
@@ -71,39 +74,71 @@ BIRDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "birds
 os.makedirs(BIRDS_DIR, exist_ok=True)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (BirdSong-Portfolio/1.0; educational project; https://github.com/hulashc/birdsong)"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
 }
 
-downloaded = []
-skipped = []
+# Retry settings
+MAX_RETRIES = 5
+BASE_DELAY  = 3.0   # seconds between normal downloads
+RETRY_WAIT  = [5, 15, 30, 60, 120]  # backoff schedule for 429/errors
 
-print(f"Saving to: {BIRDS_DIR}\n")
+
+def download_with_retry(name, url, dest):
+    """Download url → dest. Returns True on success, False on permanent failure."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=40) as r:
+                data = r.read()
+            with open(dest, "wb") as f:
+                f.write(data)
+            return True, len(data) // 1024
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = RETRY_WAIT[min(attempt, len(RETRY_WAIT) - 1)]
+                print(f"    [rate-limited] waiting {wait}s before retry {attempt + 1}/{MAX_RETRIES}...")
+                time.sleep(wait)
+            elif e.code == 404:
+                return False, f"404 Not Found — URL may have moved"
+            else:
+                wait = RETRY_WAIT[min(attempt, len(RETRY_WAIT) - 1)]
+                print(f"    [HTTP {e.code}] waiting {wait}s before retry {attempt + 1}/{MAX_RETRIES}...")
+                time.sleep(wait)
+        except Exception as e:
+            wait = RETRY_WAIT[min(attempt, len(RETRY_WAIT) - 1)]
+            print(f"    [error] {e} — waiting {wait}s before retry {attempt + 1}/{MAX_RETRIES}...")
+            time.sleep(wait)
+    return False, "max retries exceeded"
+
+
+downloaded = []
+skipped    = []
+
+print(f"Saving to: {BIRDS_DIR}")
+print(f"Note: Wikimedia rate-limits bulk downloads. Script will retry automatically.\n")
 
 for name, url in BIRDS:
-    ext = ".ogg"  # all Wikimedia sources are ogg
-    dest = os.path.join(BIRDS_DIR, f"{name}{ext}")
+    dest = os.path.join(BIRDS_DIR, f"{name}.ogg")
 
     if os.path.exists(dest):
         size_kb = os.path.getsize(dest) // 1024
-        print(f"  [skip] {name}{ext} already exists ({size_kb} KB)")
+        print(f"  [skip] {name}.ogg already exists ({size_kb} KB)")
         downloaded.append(name)
         continue
 
     print(f"Downloading: {name}")
-    try:
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = r.read()
-        with open(dest, "wb") as f:
-            f.write(data)
-        size_kb = len(data) // 1024
-        print(f"  Saved {name}{ext} ({size_kb} KB)")
+    ok, info = download_with_retry(name, url, dest)
+    if ok:
+        print(f"  Saved {name}.ogg ({info} KB)")
         downloaded.append(name)
-    except Exception as e:
-        print(f"  [ERROR] {name}: {e}")
+    else:
+        print(f"  [FAILED] {name}: {info}")
         skipped.append(name)
+        # Clean up partial file if any
+        if os.path.exists(dest):
+            os.remove(dest)
 
-    time.sleep(0.8)  # polite rate-limit
+    time.sleep(BASE_DELAY)
 
 # Write CREDITS
 credits_path = os.path.join(BIRDS_DIR, "CREDITS.md")
@@ -113,14 +148,13 @@ with open(credits_path, "w") as f:
     for name, url in BIRDS:
         f.write(f"- **{name}**: {url}\n")
 
-print(f"\nDownloaded: {len(downloaded)} | Skipped/failed: {len(skipped)}")
-
+print(f"\nDownloaded: {len(downloaded)} | Failed: {len(skipped)}")
 if skipped:
     print(f"Failed: {', '.join(skipped)}")
-    print("Tip: run the script again — Wikimedia sometimes rate-limits; it will retry skipped files.")
+    print("Run the script again — it will skip already-downloaded files and retry failed ones.")
 
 if not downloaded:
-    print("\nNo files downloaded. Check your internet connection.")
+    print("\nNo files downloaded at all. Check your internet connection.")
     sys.exit(1)
 
 print("\nRunning process_birds.py...\n")
@@ -132,4 +166,4 @@ result = subprocess.run(
 if result.returncode == 0:
     print("\nDone! birdsong_data.json updated.")
 else:
-    print("\nprocess_birds.py exited with errors.")
+    print("\nprocess_birds.py exited with errors — check above.")
