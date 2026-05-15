@@ -48,10 +48,6 @@ function heatColor(e) {
   return c;
 }
 
-function dimColor(e, factor = 0.12) {
-  return heatColor(e).multiplyScalar(factor);
-}
-
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ── Error display ──────────────────────────────────────────────────────────
@@ -86,7 +82,7 @@ addAxisLabel('PC3', new THREE.Vector3(0.04,0,1.64), '#3388ff');
 // ── Slot ───────────────────────────────────────────────────────────────────
 const NODE_COUNT = 80;
 const KNN_EDGES  = 3;
-const TRAIL_HOPS = 10;
+const TRAIL_HOPS = 12;
 
 function makeSlot() {
   return {
@@ -101,7 +97,7 @@ function makeSlot() {
     trailGeo: null, trailPos: null, trailCol: null,
     halo: null, haloMat: null,
     objects: [], labelObjects: [],
-    smoothIdx: 0,  // fractional EMA index for jitter-free motion
+    smoothIdx: 0,
   };
 }
 
@@ -191,7 +187,8 @@ function buildSlot(slot, manifold) {
     const [i, j] = edges[e];
     slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
     slot.edgePos[e*6+3] = nodePos[j*3];   slot.edgePos[e*6+4] = nodePos[j*3+1]; slot.edgePos[e*6+5] = nodePos[j*3+2];
-    const dc = dimColor(Math.max(nodeE[i], nodeE[j]), 0.08);
+    // FIX: resting edge brightness was 0.08 — too invisible. Now 0.18.
+    const dc = heatColor(Math.max(nodeE[i], nodeE[j])).multiplyScalar(0.18);
     for (let k = 0; k < 2; k++) {
       slot.edgeCol[(e*2+k)*3]   = dc.r;
       slot.edgeCol[(e*2+k)*3+1] = dc.g;
@@ -217,7 +214,8 @@ function buildSlot(slot, manifold) {
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     cloud.setMatrixAt(i, dummy.matrix);
-    nc.copy(dimColor(nodeE[i], 0.20));
+    // FIX: was 0.20 — too dark. Now 0.55 so resting nodes are actually visible.
+    nc.copy(heatColor(nodeE[i])).multiplyScalar(0.55);
     cloud.setColorAt(i, nc);
   }
   cloud.instanceMatrix.needsUpdate = true;
@@ -273,7 +271,7 @@ function currentTime(slot) {
   return clockTime;
 }
 
-// Returns fractional node index (no rounding) for smooth EMA tracking
+// Returns fractional node index for smooth EMA tracking
 function fracNodeForTime(slot, ct) {
   const { times, duration_s } = slot.manifold;
   const dur = duration_s ?? times[times.length - 1] ?? 10;
@@ -292,12 +290,13 @@ const _c = new THREE.Color();
 function tickSlot(slot) {
   if (!slot.manifold || !slot.cloud) return;
   const { nodes, nodeEnergy, edges } = slot;
-  const N   = NODE_COUNT;
-  const ct  = currentTime(slot);
+  const N  = NODE_COUNT;
+  const ct = currentTime(slot);
 
-  // EMA smooth: glide toward target index, then snap to nearest integer
+  // FIX: EMA factor was 0.06 — too slow, caused big lag then snap (jitter).
+  // 0.18 tracks the audio closely while still being visually smooth.
   const target   = fracNodeForTime(slot, ct);
-  slot.smoothIdx = slot.smoothIdx + 0.06 * (target - slot.smoothIdx);
+  slot.smoothIdx = slot.smoothIdx + 0.18 * (target - slot.smoothIdx);
   const ani      = clamp(Math.round(slot.smoothIdx), 0, N - 1);
   const ae       = nodeEnergy[ani];
 
@@ -313,7 +312,7 @@ function tickSlot(slot) {
     const isNeighbour = neighbours.has(i);
     const bright = isActive    ? 4.5 + ae * 3.0
                  : isNeighbour ? 1.2 + e  * 1.8
-                 :               0.15 + e * 0.08;
+                 :               0.55 + e * 0.35;
     const scale  = isActive    ? 2.8 + ae * 2.0
                  : isNeighbour ? 1.4 + e  * 0.6
                  :               0.7 + e  * 0.4;
@@ -331,7 +330,7 @@ function tickSlot(slot) {
   for (let ei = 0; ei < edges.length; ei++) {
     const [i, j]    = edges[ei];
     const isActive  = i === ani || j === ani;
-    const bright    = isActive ? 1.8 + ae * 2.0 : 0.07;
+    const bright    = isActive ? 1.8 + ae * 2.0 : 0.18;
     const e         = Math.max(nodeEnergy[i], nodeEnergy[j]);
     const c2        = heatColor(e);
     c2.multiplyScalar(bright);
@@ -525,8 +524,17 @@ initUpload({
     updateManifoldLegend();
     showKnnResults(classify(m, knnIndex, 3));
   },
-  onError(err) { console.error('Upload:', err); hideKnnResults(); },
-  onProgress() {},
+  onError(err) {
+    console.error('Upload error:', err);
+    const status = document.getElementById('upload-status');
+    if (status) status.textContent = 'Error: ' + (err?.message || String(err));
+    hideKnnResults();
+  },
+  onProgress(pct) {
+    const bar = document.getElementById('upload-progress-bar');
+    if (bar) { bar.style.opacity = '1'; bar.style.width = pct + '%'; }
+    if (pct >= 100) setTimeout(() => { if (bar) bar.style.opacity = '0'; }, 800);
+  },
 });
 
 // ── Animation loop ─────────────────────────────────────────────────────────
