@@ -1,80 +1,103 @@
-// upload.js — drag-and-drop / file picker UI that calls extractManifold()
+/**
+ * upload.js
+ * Dropzone UI + file-picker wired to features.js extractManifold().
+ * Calls callbacks: onManifold(manifold, file), onError(err), onProgress(ratio).
+ */
+
 import { extractManifold } from './features.js';
 
 export function initUpload({ onManifold, onError, onProgress }) {
   const dropzone   = document.getElementById('dropzone');
   const fileInput  = document.getElementById('audioFileInput');
   const statusEl   = document.getElementById('upload-status');
-  const progressBar = document.getElementById('upload-progress-bar');
+  const progressBg = document.getElementById('upload-progress-bg');
+  const progressBar= document.getElementById('upload-progress-bar');
 
+  if (!dropzone || !fileInput) return;
+
+  // ── Status helpers
   function setStatus(msg, isError = false) {
     if (!statusEl) return;
     statusEl.textContent = msg;
-    statusEl.style.color = isError ? 'rgba(255,100,80,0.9)' : 'rgba(255,255,255,0.3)';
+    statusEl.style.color = isError
+      ? 'rgba(255, 80, 80, 0.75)'
+      : 'rgba(218, 218, 218, 0.35)';
   }
 
-  function setProgress(pct) {
+  function setProgress(ratio) {
     if (!progressBar) return;
-    progressBar.style.width = pct + '%';
-    progressBar.style.opacity = pct > 0 && pct < 100 ? '1' : '0';
+    if (ratio <= 0) {
+      progressBar.style.opacity = '0';
+      progressBar.style.width   = '0%';
+      return;
+    }
+    progressBar.style.opacity = '1';
+    progressBar.style.width   = `${Math.round(ratio * 100)}%`;
+    if (ratio >= 1) {
+      setTimeout(() => {
+        progressBar.style.opacity = '0';
+        progressBar.style.width   = '0%';
+      }, 900);
+    }
   }
 
+  // ── Process a File object
   async function processFile(file) {
-    if (!file.type.startsWith('audio/') && !/\.(mp3|wav|ogg|flac|aac|m4a)$/i.test(file.name)) {
-      setStatus('Please upload an audio file (.mp3, .wav, .ogg, .flac)', true);
+    if (!file || !file.type.startsWith('audio/')) {
+      setStatus('Not an audio file.', true);
+      if (onError) onError(new Error('Not audio'));
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setStatus('File too large (max 50 MB).', true);
+      if (onError) onError(new Error('File too large'));
       return;
     }
 
-    const speciesName = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/\s+/g, '_');
-    setStatus('Reading file…');
-    setProgress(10);
-    onProgress?.('reading');
+    dropzone.classList.remove('drag-over');
+    setStatus('Decoding audio…');
+    setProgress(0.02);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      setStatus('Decoding audio…');
-      setProgress(25);
+      const manifold = await extractManifold(file, (ratio) => {
+        setProgress(ratio);
+        if (ratio < 0.75) setStatus('Extracting features…');
+        else if (ratio < 0.9) setStatus('Running PCA…');
+        else setStatus('Building manifold…');
+        if (onProgress) onProgress(ratio);
+      });
 
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      audioCtx.close();
+      setProgress(1.0);
+      setStatus(`Done — ${manifold.t.length} frames`);
 
-      setStatus('Extracting features…');
-      setProgress(40);
-      onProgress?.('extracting');
-
-      await new Promise(r => setTimeout(r, 20));
-
-      const manifold = await extractManifold(audioBuffer, speciesName);
-
-      setProgress(100);
-      setStatus(`\u2713 ${speciesName.replace(/_/g, ' ')}`);
-      onProgress?.('done');
-      onManifold?.(manifold, file);
+      if (onManifold) onManifold(manifold, file);
     } catch (err) {
-      console.error(err);
-      setStatus('Failed: ' + err.message, true);
+      console.error('[upload]', err);
+      setStatus('Failed: ' + (err.message || 'unknown error'), true);
       setProgress(0);
-      onError?.(err);
+      if (onError) onError(err);
     }
   }
 
-  fileInput?.addEventListener('change', e => {
-    if (e.target.files[0]) processFile(e.target.files[0]);
+  // ── Click to open file picker
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) processFile(fileInput.files[0]);
+    fileInput.value = '';
   });
 
-  dropzone?.addEventListener('click', () => fileInput?.click());
-
-  dropzone?.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput?.click(); }
-  });
-
-  dropzone?.addEventListener('dragover', e => {
+  // ── Drag-and-drop
+  dropzone.addEventListener('dragover', e => {
     e.preventDefault();
     dropzone.classList.add('drag-over');
   });
-  dropzone?.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
-  dropzone?.addEventListener('drop', e => {
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('drag-over');
+  });
+  dropzone.addEventListener('drop', e => {
     e.preventDefault();
     dropzone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
