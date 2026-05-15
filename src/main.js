@@ -49,6 +49,14 @@ function energyToColor(e, tint = 'primary') {
   return c;
 }
 
+// Keep only every Nth raw point for the visible node cloud
+// so it's not too cluttered — ~80 nodes looks good
+function decimatePoints(pts, target = 80) {
+  if (pts.length <= target) return pts;
+  const step = Math.floor(pts.length / target);
+  return pts.filter((_, i) => i % step === 0);
+}
+
 function smoothPoints(pts, divisions = 5) {
   if (pts.length < 2) return pts;
   const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
@@ -102,11 +110,18 @@ function makeSlot(tint) {
   return {
     tint, manifold: null,
     audio: null, audioReady: false,
+    // active traveller dot
     dot: null, dotMat: null,
+    // point cloud (InstancedMesh of spheres)
+    pointCloud: null, pointMats: null,
+    // connector path (faint line through all nodes)
+    connectorLine: null,
+    // comet tail
     tailGeo: null, tPos: null, tCol: null, tRaw: null,
+    // ink trace
     inkGeo: null, inkPos: null, inkCol: null,
     inkHead: 0, lastIdx: -1,
-    ghostLine: null, objects: [],
+    objects: [],
   };
 }
 
@@ -117,48 +132,92 @@ function disposeSlot(slot) {
   for (const obj of slot.objects) {
     scene.remove(obj);
     if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+      else obj.material.dispose();
+    }
   }
   slot.objects = [];
   if (slot.tailGeo) { slot.tailGeo.dispose(); slot.tailGeo = null; }
   if (slot.inkGeo)  { slot.inkGeo.dispose();  slot.inkGeo  = null; }
   slot.manifold = null; slot.inkHead = 0; slot.lastIdx = -1;
+  slot.pointCloud = null; slot.pointMats = null; slot.connectorLine = null;
 }
+
+// Shared sphere geometry for instanced point cloud
+const SPHERE_GEO = new THREE.SphereGeometry(0.009, 8, 8);
 
 function buildSlot(slot, manifold) {
   disposeSlot(slot);
-  const rawPts = manifold.xyz.map(([x,y,z]) => new THREE.Vector3(x,y,z));
-  const points = smoothPoints(rawPts, 4);
-  const energy = manifold.energy || [];
-  const times  = manifold.t;
+  const rawPts  = manifold.xyz.map(([x,y,z]) => new THREE.Vector3(x,y,z));
+  const points  = smoothPoints(rawPts, 4);
+  const energy  = manifold.energy || [];
+  const times   = manifold.t;
 
-  // Ghost path
+  // ── 1. Node cloud: decimated raw points as instanced spheres ──
+  const nodesPts  = decimatePoints(rawPts, 80);
+  const nodeCount = nodesPts.length;
+
+  // One shared material, colour set per-instance via instanceColor
+  const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 });
+  const cloud    = new THREE.InstancedMesh(SPHERE_GEO, cloudMat, nodeCount);
+  cloud.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+  const dummy    = new THREE.Object3D();
+  const step     = Math.max(1, Math.floor(rawPts.length / nodeCount));
+  const nodeColor = new THREE.Color();
+
+  for (let i = 0; i < nodeCount; i++) {
+    const p  = nodesPts[i];
+    const ri = Math.min(i * step, energy.length - 1);
+    const e  = energy[ri] ?? 0;
+    const s  = 0.7 + e * 1.1; // size scales with energy
+    dummy.position.copy(p);
+    dummy.scale.set(s, s, s);
+    dummy.updateMatrix();
+    cloud.setMatrixAt(i, dummy.matrix);
+    nodeColor.copy(energyToColor(e, slot.tint));
+    nodeColor.multiplyScalar(0.55); // dim — not competing with traveller
+    cloud.setColorAt(i, nodeColor);
+  }
+  cloud.instanceMatrix.needsUpdate = true;
+  if (cloud.instanceColor) cloud.instanceColor.needsUpdate = true;
+
+  scene.add(cloud);
+  slot.pointCloud = cloud;
+  slot.objects.push(cloud);
+
+  // ── 2. Connector path: thin faint line through node positions ──
   {
-    const positions = new Float32Array(points.length * 3);
-    const colors    = new Float32Array(points.length * 3);
-    points.forEach((p, i) => {
-      positions[i*3] = p.x; positions[i*3+1] = p.y; positions[i*3+2] = p.z;
-      const ri = Math.floor((i / points.length) * rawPts.length);
-      const c  = energyToColor((energy[ri] ?? 0), slot.tint);
-      colors[i*3] = c.r * 0.28; colors[i*3+1] = c.g * 0.28; colors[i*3+2] = c.b * 0.28;
+    const positions = new Float32Array(nodeCount * 3);
+    const colors    = new Float32Array(nodeCount * 3);
+    nodesPts.forEach((p, i) => {
+      positions[i*3]   = p.x;
+      positions[i*3+1] = p.y;
+      positions[i*3+2] = p.z;
+      const ri = Math.min(i * step, energy.length - 1);
+      const c  = energyToColor(energy[ri] ?? 0, slot.tint);
+      colors[i*3]   = c.r * 0.18;
+      colors[i*3+1] = c.g * 0.18;
+      colors[i*3+2] = c.b * 0.18;
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
     const line = new THREE.Line(geo,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 }));
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.28 }));
     scene.add(line);
-    slot.ghostLine = line;
+    slot.connectorLine = line;
     slot.objects.push(line);
   }
 
-  // Dot
+  // ── 3. Traveller dot (the bright moving sphere) ──
   slot.dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  slot.dot    = new THREE.Mesh(new THREE.SphereGeometry(0.012, 16, 16), slot.dotMat);
+  slot.dot    = new THREE.Mesh(new THREE.SphereGeometry(0.016, 20, 20), slot.dotMat);
   scene.add(slot.dot);
   slot.objects.push(slot.dot);
 
-  // Comet tail
+  // ── 4. Comet tail (dynamic line behind traveller) ──
   slot.tPos = new Float32Array(TAIL * 3);
   slot.tCol = new Float32Array(TAIL * 3);
   slot.tRaw = new Float32Array(TAIL * 3);
@@ -166,11 +225,11 @@ function buildSlot(slot, manifold) {
   slot.tailGeo.setAttribute('position', new THREE.BufferAttribute(slot.tPos, 3));
   slot.tailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.tCol, 3));
   const tailLine = new THREE.Line(slot.tailGeo,
-    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.92 }));
   scene.add(tailLine);
   slot.objects.push(tailLine);
 
-  // Ink path
+  // ── 5. Ink trace (revealed path) ──
   slot.inkPos  = new Float32Array(points.length * 3);
   slot.inkCol  = new Float32Array(points.length * 3);
   slot.inkHead = 0; slot.lastIdx = -1;
@@ -179,7 +238,7 @@ function buildSlot(slot, manifold) {
   slot.inkGeo.setAttribute('color',    new THREE.BufferAttribute(slot.inkCol, 3));
   slot.inkGeo.setDrawRange(0, 0);
   const inkLine = new THREE.Line(slot.inkGeo,
-    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 }));
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.42 }));
   scene.add(inkLine);
   slot.objects.push(inkLine);
 
@@ -278,7 +337,6 @@ const speciesMap = isSingle ? { [(allData.species || 'birdsong')]: allData } : a
 const speciesKeys = Object.keys(speciesMap);
 if (!speciesKeys.length) { showError('birdsong_data.json is empty.'); throw new Error('Empty'); }
 
-// Build K-NN index once — reused for every upload
 const knnIndex = buildIndex(speciesMap);
 
 // ── Dropdown ─────────────────────────────────────────────
@@ -308,7 +366,6 @@ function showKnnResults(results) {
   const panel = document.getElementById('knn-results');
   const list  = document.getElementById('knn-list');
   if (!panel || !list) return;
-
   list.innerHTML = '';
   results.forEach(({ species, distance, rank }) => {
     const pct = distToSimilarity(distance);
@@ -319,14 +376,12 @@ function showKnnResults(results) {
       <span class="knn-species">${species.replace(/_/g, ' ')}</span>
       <span class="knn-pct">${pct}%</span>
     `;
-    // Thin bar showing similarity
     const bar = document.createElement('div');
     bar.className = 'knn-bar';
     bar.innerHTML = `<div class="knn-bar-fill" style="width:${pct}%"></div>`;
     list.appendChild(row);
     list.appendChild(bar);
   });
-
   panel.style.display = 'block';
 }
 
@@ -382,7 +437,7 @@ playBtn.addEventListener('click', (e) => {
   }
 });
 
-// ── Upload — runs K-NN after extraction ──────────────────
+// ── Upload ───────────────────────────────────────────────
 initUpload({
   onManifold(m, file) {
     buildSlot(secondary, m);
@@ -398,8 +453,6 @@ initUpload({
     if (modeBadge) modeBadge.textContent = m.species.replace(/_/g,' ').toUpperCase();
     document.getElementById('legend-secondary').textContent = m.species.replace(/_/g,' ');
     updateManifoldLegend();
-
-    // ── Run K-NN and show results
     const results = classify(m, knnIndex, 3);
     showKnnResults(results);
   },
@@ -410,7 +463,7 @@ initUpload({
   onProgress() {}
 });
 
-// ── Animation ────────────────────────────────────────────
+// ── Animation loop ───────────────────────────────────────
 function tickSlot(slot) {
   if (!slot.manifold) return;
   const ct  = currentTime(slot);
@@ -418,10 +471,40 @@ function tickSlot(slot) {
   const pos = slot.manifold.points[i];
   const ri  = Math.floor((i / slot.manifold.points.length) * slot.manifold.rawPts.length);
   const e   = slot.manifold.energy[ri] ?? 0;
+
+  // Move traveller
   slot.dot.position.copy(pos);
   slot.dotMat.color = energyToColor(e, slot.tint);
   const s = 1 + e * 1.4;
   slot.dot.scale.set(s, s, s);
+
+  // Pulse the nearest node in the point cloud
+  if (slot.pointCloud) {
+    const nodeCount = slot.pointCloud.count;
+    const nodeStep  = Math.max(1, Math.floor(slot.manifold.rawPts.length / nodeCount));
+    const nearestNode = Math.round(ri / nodeStep);
+    const dummy = new THREE.Object3D();
+    const nodeColor = new THREE.Color();
+    for (let n = 0; n < nodeCount; n++) {
+      const dist = Math.abs(n - nearestNode);
+      // Nearest node glows brighter; others stay dim
+      const bright = dist === 0 ? 1.1 : Math.max(0.22, 0.55 - dist * 0.04);
+      const ni = Math.min(n * nodeStep, slot.manifold.energy.length - 1);
+      const ne = slot.manifold.energy[ni] ?? 0;
+      const ns = (0.7 + ne * 1.1) * (dist === 0 ? 1.6 + e * 0.8 : 1.0);
+      slot.pointCloud.getMatrixAt(n, dummy.matrix);
+      dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+      dummy.scale.set(ns, ns, ns);
+      dummy.updateMatrix();
+      slot.pointCloud.setMatrixAt(n, dummy.matrix);
+      nodeColor.copy(energyToColor(ne, slot.tint));
+      nodeColor.multiplyScalar(bright);
+      slot.pointCloud.setColorAt(n, nodeColor);
+    }
+    slot.pointCloud.instanceMatrix.needsUpdate = true;
+    if (slot.pointCloud.instanceColor) slot.pointCloud.instanceColor.needsUpdate = true;
+  }
+
   pushTail(slot, pos, e);
   inkPath(slot, i, e);
 }
