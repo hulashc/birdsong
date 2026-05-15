@@ -31,12 +31,9 @@ controls.maxDistance     = 10;
 // ── Helpers ─────────────────────────────────────────────
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// Two tint sets: primary (cool blue→orange, original palette) and
-// secondary (warm gold tones) for the uploaded/comparison manifold.
 function energyToColor(e, tint = 'primary') {
   const c = new THREE.Color();
   if (tint === 'secondary') {
-    // Warm gold palette for uploaded / comparison manifold
     c.setHSL(0.12 - clamp(e, 0, 1) * 0.08, 0.9, 0.55);
   } else {
     c.setHSL(0.62 - clamp(e, 0, 1) * 0.62, 0.95, 0.58);
@@ -90,8 +87,6 @@ addAxisLabel('PC2', new THREE.Vector3(0.05, 1.48, 0), '#55ff88');
 addAxisLabel('PC3', new THREE.Vector3(0.05, 0, 1.48), '#5599ff');
 
 // ── Manifold slots ────────────────────────────────────────
-// Slot 0 = primary (species selector), Slot 1 = secondary (upload)
-
 const TAIL = 280;
 
 function makeSlot(tint) {
@@ -99,17 +94,18 @@ function makeSlot(tint) {
     tint,
     manifold: null,
     audio: null,
+    audioReady: false,   // true once an audio source loaded successfully
     dot: null, dotMat: null,
     tailGeo: null, tPos: null, tCol: null, tRaw: null,
     inkGeo: null, inkPos: null, inkCol: null,
     inkHead: 0, lastIdx: -1,
     ghostLine: null,
-    objects: [],   // all scene objects to remove on swap
+    objects: [],
   };
 }
 
-const primary   = makeSlot('primary');    // species dropdown
-const secondary = makeSlot('secondary'); // upload
+const primary   = makeSlot('primary');
+const secondary = makeSlot('secondary');
 
 function disposeSlot(slot) {
   for (const obj of slot.objects) {
@@ -120,9 +116,9 @@ function disposeSlot(slot) {
   slot.objects = [];
   if (slot.tailGeo) { slot.tailGeo.dispose(); slot.tailGeo = null; }
   if (slot.inkGeo)  { slot.inkGeo.dispose();  slot.inkGeo  = null; }
-  slot.manifold = null;
-  slot.inkHead  = 0;
-  slot.lastIdx  = -1;
+  slot.manifold   = null;
+  slot.inkHead    = 0;
+  slot.lastIdx    = -1;
 }
 
 function buildSlot(slot, manifold) {
@@ -228,6 +224,17 @@ function inkPath(slot, i, e) {
   inkGeo.attributes.color.needsUpdate    = true;
 }
 
+// Clock-based fallback time when audio has no src / failed to load
+let clockTime = 0;
+let lastTimestamp = null;
+
+function currentTime(slot) {
+  if (slot.audioReady && slot.audio && !slot.audio.paused) {
+    return slot.audio.currentTime;
+  }
+  return clockTime;
+}
+
 function indexForTime(slot, ct) {
   if (!slot.manifold) return 0;
   const { times, points, duration_s } = slot.manifold;
@@ -243,11 +250,39 @@ function indexForTime(slot, ct) {
 }
 
 // ── Audio helpers ─────────────────────────────────────────
-function loadAudioForSlot(slot, src) {
+// Try ogg first, then mp3 — whichever loads wins.
+function loadAudioForSlot(slot, key) {
   if (slot.audio) { slot.audio.pause(); slot.audio.src = ''; }
-  const audio = new Audio(src);
-  audio.loop  = true;
-  slot.audio  = audio;
+  slot.audioReady = false;
+
+  const candidates = [`./birds/${key}.ogg`, `./birds/${key}.mp3`];
+  let idx = 0;
+
+  const audio = new Audio();
+  audio.loop = true;
+  slot.audio = audio;
+
+  function tryNext() {
+    if (idx >= candidates.length) {
+      // No audio found — visualisation will run on clock time
+      console.warn(`[birdsong] No audio found for "${key}" — running visualisation without audio.`);
+      slot.audioReady = false;
+      return;
+    }
+    audio.src = candidates[idx++];
+    audio.load();
+  }
+
+  audio.addEventListener('canplaythrough', () => {
+    slot.audioReady = true;
+    if (started && !paused) audio.play().catch(() => {});
+  }, { once: true });
+
+  audio.addEventListener('error', () => {
+    tryNext(); // try next extension
+  });
+
+  tryNext();
   return audio;
 }
 
@@ -262,7 +297,6 @@ try {
   throw err;
 }
 
-// Normalise: support both single-species and multi-species JSON
 const isSingle = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
 const speciesMap = isSingle
   ? { [(allData.species || 'birdsong')]: allData }
@@ -290,18 +324,14 @@ function setTitleLabels(name) {
   document.getElementById('label').textContent = pretty + ' · Spatiotemporal Acoustic Manifold';
 }
 
-// Update manifold-legend dots
 function updateManifoldLegend() {
   const legendEl = document.getElementById('manifold-legend');
   const hasSecondary = !!secondary.manifold;
   legendEl.classList.toggle('visible', hasSecondary);
-
   const primaryName = select.value.replace(/_/g, ' ');
   document.getElementById('legend-primary').textContent = primaryName;
-
-  // colour of primary dot: mid-energy primary tint
   const c = new THREE.Color();
-  c.setHSL(0.62 - 0.31, 0.95, 0.58); // ~cyan
+  c.setHSL(0.62 - 0.31, 0.95, 0.58);
   document.getElementById('dot-primary').style.background =
     `rgb(${Math.round(c.r*255)},${Math.round(c.g*255)},${Math.round(c.b*255)})`;
 }
@@ -311,26 +341,16 @@ function loadSpecies(key) {
   const mRaw = speciesMap[key];
   if (!mRaw) return;
   const m = { ...mRaw, duration_s: mRaw.duration_s ?? mRaw.t[mRaw.t.length - 1] ?? 10 };
-
   buildSlot(primary, m);
-  loadAudioForSlot(primary, `./birds/${key}.mp3`);
+  loadAudioForSlot(primary, key);   // ← pass key, not path
   setTitleLabels(key);
   updateManifoldLegend();
-
-  if (started) {
-    primary.audio.play().catch(() => {});
-    paused = false;
-    playBtn.textContent = 'Pause';
-  }
 }
 
-// Initial load: first species
 loadSpecies(speciesKeys[0]);
 select.value = speciesKeys[0];
 
-// Dropdown change
 select.addEventListener('change', () => {
-  // Fade: stop primary audio, switch manifold
   if (primary.audio) primary.audio.pause();
   loadSpecies(select.value);
 });
@@ -339,37 +359,36 @@ select.addEventListener('change', () => {
 let started = false;
 let paused  = false;
 
-const overlay = document.getElementById('overlay');
-const playBtn = document.getElementById('playBtn');
+const overlay   = document.getElementById('overlay');
+const playBtn   = document.getElementById('playBtn');
 const modeBadge = document.getElementById('mode-badge');
 
-overlay.addEventListener('click', async () => {
-  try {
-    await primary.audio?.play();
-    // also start secondary if present
-    if (secondary.audio) secondary.audio.play().catch(() => {});
-    overlay.classList.add('hidden');
-    setTimeout(() => overlay.style.display = 'none', 900);
-    playBtn.style.display = 'block';
-    started = true;
-  } catch (err) {
-    showError(`Could not play audio: ${err.message}`);
-  }
+overlay.addEventListener('click', () => {
+  // Always dismiss overlay and start the visualisation,
+  // even if no audio loaded (clock-driven fallback).
+  overlay.classList.add('hidden');
+  setTimeout(() => overlay.style.display = 'none', 900);
+  playBtn.style.display = 'block';
+  started = true;
+  paused  = false;
+  playBtn.textContent = 'Pause';
+
+  // Attempt audio — fire-and-forget (errors are non-fatal)
+  primary.audio?.play().catch(() => {});
+  if (secondary.audio) secondary.audio.play().catch(() => {});
 }, { once: true });
 
-playBtn.addEventListener('click', async () => {
+playBtn.addEventListener('click', () => {
   if (!paused) {
     primary.audio?.pause();
     secondary.audio?.pause();
-    paused = true; playBtn.textContent = 'Resume';
+    paused = true;
+    playBtn.textContent = 'Resume';
   } else {
-    try {
-      await primary.audio?.play();
-      if (secondary.audio) secondary.audio.play().catch(() => {});
-      paused = false; playBtn.textContent = 'Pause';
-    } catch (err) {
-      showError(`Could not resume: ${err.message}`);
-    }
+    primary.audio?.play().catch(() => {});
+    if (secondary.audio) secondary.audio.play().catch(() => {});
+    paused = false;
+    playBtn.textContent = 'Pause';
   }
 });
 
@@ -377,18 +396,22 @@ playBtn.addEventListener('click', async () => {
 initUpload({
   onManifold(uploadedManifold, file) {
     buildSlot(secondary, uploadedManifold);
-    loadAudioForSlot(secondary, URL.createObjectURL(file));
+
+    if (secondary.audio) { secondary.audio.pause(); secondary.audio.src = ''; }
+    secondary.audioReady = false;
+    const audio = new Audio(URL.createObjectURL(file));
+    audio.loop = true;
+    secondary.audio = audio;
+    audio.addEventListener('canplaythrough', () => {
+      secondary.audioReady = true;
+      if (started && !paused) audio.play().catch(() => {});
+    }, { once: true });
 
     const name = uploadedManifold.species.replace(/_/g, ' ').toUpperCase();
     if (modeBadge) modeBadge.textContent = name;
-    document.getElementById('legend-secondary').textContent = uploadedManifold.species.replace(/_/g, ' ');
+    document.getElementById('legend-secondary').textContent =
+      uploadedManifold.species.replace(/_/g, ' ');
     updateManifoldLegend();
-
-    if (started) {
-      secondary.audio.play().catch(() => {});
-      paused = false;
-      playBtn.textContent = 'Pause';
-    }
   },
   onError(err) { console.error('Upload error:', err); },
   onProgress() {}
@@ -396,8 +419,9 @@ initUpload({
 
 // ── Animate ───────────────────────────────────────────────
 function tickSlot(slot) {
-  if (!slot.manifold || !slot.audio) return;
-  const i   = indexForTime(slot, slot.audio.currentTime);
+  if (!slot.manifold) return;
+  const ct  = currentTime(slot);
+  const i   = indexForTime(slot, ct);
   const pos = slot.manifold.points[i];
   const ri  = Math.floor((i / slot.manifold.points.length) * slot.manifold.rawPts.length);
   const e   = slot.manifold.energy[ri] ?? 0;
@@ -411,20 +435,28 @@ function tickSlot(slot) {
   inkPath(slot, i, e);
 }
 
-function animate() {
+function animate(ts) {
   requestAnimationFrame(animate);
   controls.update();
 
   if (started && !paused) {
+    // Advance clock (used when audio is absent)
+    if (lastTimestamp !== null) {
+      clockTime += (ts - lastTimestamp) / 1000;
+    }
+    lastTimestamp = ts;
+
     tickSlot(primary);
     if (secondary.manifold) tickSlot(secondary);
+  } else {
+    lastTimestamp = null;
   }
 
   renderer.render(scene, camera);
   css2d.render(scene, camera);
 }
 
-animate();
+animate(0);
 
 // ── Resize ────────────────────────────────────────────────
 window.addEventListener('resize', () => {
