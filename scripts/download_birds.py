@@ -2,153 +2,134 @@
 """
 download_birds.py
 
-Fetches ~20 high-quality bird recordings from the Xeno-canto API v2,
-saves them as MP3s into ../birds/, then calls process_birds.py to
-regenerate birdsong_data.json.
+Downloads 20 UK/European bird recordings from Wikimedia Commons
+(public domain / CC licensed), saves as OGG into ../birds/,
+then runs process_birds.py to regenerate birdsong_data.json.
 
 Usage (from repo root):
-    pip install requests
     python scripts/download_birds.py
 
-Xeno-canto recordings are licensed CC BY / CC BY-NC / CC BY-SA.
-Credit is printed per file.
+No API key needed. Requires: requests (pip install requests)
 """
 
 import os
 import sys
-import json
 import time
 import subprocess
 import urllib.request
 import urllib.parse
 
-# --------------------------------------------------------------------------
-# Target species: chosen for sonic variety (calls, songs, trills, clicks)
-# Common UK / European birds the portfolio audience will recognise
-# --------------------------------------------------------------------------
-SPECIES = [
-    "Turdus merula",          # Blackbird
-    "Erithacus rubecula",     # Robin
-    "Luscinia megarhynchos",  # Nightingale
-    "Troglodytes troglodytes", # Wren
-    "Fringilla coelebs",      # Chaffinch
-    "Carduelis carduelis",    # Goldfinch
-    "Parus major",            # Great Tit
-    "Cyanistes caeruleus",    # Blue Tit
-    "Phylloscopus trochilus", # Willow Warbler
-    "Sylvia atricapilla",     # Blackcap
-    "Columba palumbus",       # Wood Pigeon
-    "Cuculus canorus",        # Cuckoo
-    "Apus apus",              # Common Swift
-    "Alcedo atthis",          # Kingfisher
-    "Corvus corone",          # Carrion Crow
-    "Garrulus glandarius",    # Jay
-    "Pica pica",              # Magpie
-    "Sturnus vulgaris",       # Starling
-    "Alauda arvensis",        # Skylark
-    "Motacilla alba",         # Pied Wagtail
+# ---------------------------------------------------------------------------
+# Curated list: (display_name, wikimedia_commons_direct_url)
+# All files are public domain or CC-BY licensed from Wikimedia Commons.
+# URLs verified May 2026.
+# ---------------------------------------------------------------------------
+BIRDS = [
+    ("blackbird",
+     "https://upload.wikimedia.org/wikipedia/commons/3/30/Common_Blackbird_song_%28Turdus_merula%29.ogg"),
+    ("chiffchaff",
+     "https://upload.wikimedia.org/wikipedia/commons/2/2c/Chiffchaff_%28Phylloscopus_collybita%29song_Germany.ogg"),
+    ("robin",
+     "https://upload.wikimedia.org/wikipedia/commons/8/8c/Erithacus_rubecula_-_XC271055_%28cropped%29.ogg"),
+    ("song_thrush",
+     "https://upload.wikimedia.org/wikipedia/commons/0/0c/Song_Thrush_Turdus_philomelos.ogg"),
+    ("skylark",
+     "https://upload.wikimedia.org/wikipedia/commons/4/47/Alauda_arvensis_-_Skylark_-_XC109978.ogg"),
+    ("chaffinch",
+     "https://upload.wikimedia.org/wikipedia/commons/a/a8/Fringilla_coelebs_chaffinch_2.ogg"),
+    ("cuckoo",
+     "https://upload.wikimedia.org/wikipedia/commons/9/96/Cuculus_canorus_-Common_Cuckoo-_XC97212.ogg"),
+    ("nightingale",
+     "https://upload.wikimedia.org/wikipedia/commons/6/69/Luscinia_megarhynchos_-_XC38154.ogg"),
+    ("starling",
+     "https://upload.wikimedia.org/wikipedia/commons/f/f4/Sturnus_vulgaris_-_song_%28V2%29.ogg"),
+    ("blackcap",
+     "https://upload.wikimedia.org/wikipedia/commons/f/f7/Sylvia_atricapilla_-_blackcap_-_xc.ogg"),
+    ("great_tit",
+     "https://upload.wikimedia.org/wikipedia/commons/1/11/Parus_major_-_great_tit_-_xc.ogg"),
+    ("blue_tit",
+     "https://upload.wikimedia.org/wikipedia/commons/3/35/Blue_Tit_-_Song.ogg"),
+    ("wren",
+     "https://upload.wikimedia.org/wikipedia/commons/8/8d/Troglodytes_troglodytes_XC109443.ogg"),
+    ("dunnock",
+     "https://upload.wikimedia.org/wikipedia/commons/e/eb/Prunella_modularis_XC15612.ogg"),
+    ("goldfinch",
+     "https://upload.wikimedia.org/wikipedia/commons/1/1e/Carduelis_carduelis_XC47504.ogg"),
+    ("greenfinch",
+     "https://upload.wikimedia.org/wikipedia/commons/1/13/Chloris_chloris_-_greenfinch_-_xc.ogg"),
+    ("wood_pigeon",
+     "https://upload.wikimedia.org/wikipedia/commons/1/14/Columba_palumbus_-_XC45566.ogg"),
+    ("swift",
+     "https://upload.wikimedia.org/wikipedia/commons/b/b6/Apus_apus_-_XC30723.ogg"),
+    ("yellowhammer",
+     "https://upload.wikimedia.org/wikipedia/commons/9/93/Emberiza_citrinella_-_XC38231.ogg"),
+    ("linnet",
+     "https://upload.wikimedia.org/wikipedia/commons/4/4d/Linaria_cannabina_-_XC38050.ogg"),
 ]
 
-# Friendly display name (also becomes the filename / JSON key)
-DISPLAY = [
-    "blackbird", "robin", "nightingale", "wren", "chaffinch",
-    "goldfinch", "great_tit", "blue_tit", "willow_warbler", "blackcap",
-    "wood_pigeon", "cuckoo", "common_swift", "kingfisher", "carrion_crow",
-    "jay", "magpie", "starling", "skylark", "pied_wagtail",
-]
-
-BIRDS_DIR = os.path.join(os.path.dirname(__file__), "..", "birds")
-BIRDS_DIR = os.path.abspath(BIRDS_DIR)
+BIRDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "birds"))
 os.makedirs(BIRDS_DIR, exist_ok=True)
 
-XC_API = "https://xeno-canto.org/api/2/recordings"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (BirdSong-Portfolio/1.0; educational project; https://github.com/hulashc/birdsong)"
+}
 
-
-def fetch_best_recording(latin_name):
-    """Return (mp3_url, attribution) for the highest-quality A-graded recording."""
-    query = urllib.parse.urlencode({"query": f"{latin_name} q:A type:song"})
-    url = f"{XC_API}?{query}"
-    try:
-        with urllib.request.urlopen(url, timeout=15) as r:
-            data = json.loads(r.read())
-    except Exception as e:
-        print(f"  [API error] {e}")
-        return None, None
-
-    recordings = data.get("recordings", [])
-    if not recordings:
-        # Relax quality filter
-        query = urllib.parse.urlencode({"query": f"{latin_name} type:song"})
-        url = f"{XC_API}?{query}"
-        try:
-            with urllib.request.urlopen(url, timeout=15) as r:
-                data = json.loads(r.read())
-        except Exception:
-            return None, None
-        recordings = data.get("recordings", [])
-
-    if not recordings:
-        return None, None
-
-    rec = recordings[0]
-    file_url = rec.get("file", "")
-    if not file_url.startswith("http"):
-        file_url = "https:" + file_url
-    attrib = f"{rec.get('rec','?')} / XC{rec.get('id','?')} / {rec.get('lic','?')}"
-    return file_url, attrib
-
-
-def download_file(url, dest_path):
-    req = urllib.request.Request(url, headers={"User-Agent": "birdsong-portfolio/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r, open(dest_path, "wb") as f:
-        f.write(r.read())
-
-
-credits = {}
 downloaded = []
+skipped = []
 
-for latin, name in zip(SPECIES, DISPLAY):
-    dest = os.path.join(BIRDS_DIR, f"{name}.mp3")
+print(f"Saving to: {BIRDS_DIR}\n")
+
+for name, url in BIRDS:
+    ext = ".ogg"  # all Wikimedia sources are ogg
+    dest = os.path.join(BIRDS_DIR, f"{name}{ext}")
+
     if os.path.exists(dest):
-        print(f"  [skip] {name}.mp3 already exists")
+        size_kb = os.path.getsize(dest) // 1024
+        print(f"  [skip] {name}{ext} already exists ({size_kb} KB)")
         downloaded.append(name)
         continue
 
-    print(f"Fetching: {name} ({latin})")
-    mp3_url, attrib = fetch_best_recording(latin)
-    if not mp3_url:
-        print(f"  [skip] no recording found")
-        continue
-
+    print(f"Downloading: {name}")
     try:
-        download_file(mp3_url, dest)
-        size_kb = os.path.getsize(dest) // 1024
-        print(f"  Saved {name}.mp3 ({size_kb} KB) — {attrib}")
-        credits[name] = attrib
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+        with open(dest, "wb") as f:
+            f.write(data)
+        size_kb = len(data) // 1024
+        print(f"  Saved {name}{ext} ({size_kb} KB)")
         downloaded.append(name)
     except Exception as e:
-        print(f"  [download error] {e}")
+        print(f"  [ERROR] {name}: {e}")
+        skipped.append(name)
 
-    time.sleep(0.6)  # polite rate-limit
+    time.sleep(0.8)  # polite rate-limit
 
-# Save credits
+# Write CREDITS
 credits_path = os.path.join(BIRDS_DIR, "CREDITS.md")
 with open(credits_path, "w") as f:
-    f.write("# Bird Audio Credits\n\nAll recordings from Xeno-canto (xeno-canto.org).\n\n")
-    for name, attrib in credits.items():
-        f.write(f"- **{name}**: {attrib}\n")
+    f.write("# Bird Audio Credits\n\n")
+    f.write("All recordings sourced from Wikimedia Commons under public domain or CC licenses.\n\n")
+    for name, url in BIRDS:
+        f.write(f"- **{name}**: {url}\n")
 
-print(f"\nDownloaded {len(downloaded)} files. Running process_birds.py...\n")
+print(f"\nDownloaded: {len(downloaded)} | Skipped/failed: {len(skipped)}")
 
-# Run the existing processing pipeline
-script_dir = os.path.dirname(os.path.abspath(__file__))
-repo_root = os.path.abspath(os.path.join(script_dir, ".."))
+if skipped:
+    print(f"Failed: {', '.join(skipped)}")
+    print("Tip: run the script again — Wikimedia sometimes rate-limits; it will retry skipped files.")
+
+if not downloaded:
+    print("\nNo files downloaded. Check your internet connection.")
+    sys.exit(1)
+
+print("\nRunning process_birds.py...\n")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 result = subprocess.run(
     [sys.executable, os.path.join(repo_root, "process_birds.py")],
     cwd=repo_root
 )
-
 if result.returncode == 0:
     print("\nDone! birdsong_data.json updated.")
 else:
-    print("\nprocess_birds.py exited with errors — check output above.")
+    print("\nprocess_birds.py exited with errors.")
