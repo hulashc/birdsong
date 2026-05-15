@@ -29,7 +29,7 @@ controls.autoRotateSpeed = 0.25;
 controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
-// ── Colour map: dark → red → orange → yellow → white (heat) ───────────────
+// ── Colour map ────────────────────────────────────────────────────────────
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
@@ -98,6 +98,7 @@ function makeSlot() {
     halo: null, haloMat: null,
     objects: [], labelObjects: [],
     smoothIdx: 0,
+    prevClockTime: -1,  // used for loop-wrap detection
   };
 }
 
@@ -120,6 +121,7 @@ function disposeSlot(slot) {
   slot.manifold = null; slot.cloud = null; slot.halo = null;
   slot.trail = [];
   slot.smoothIdx = 0;
+  slot.prevClockTime = -1;
 }
 
 function buildEdges(positions, N, k) {
@@ -187,7 +189,6 @@ function buildSlot(slot, manifold) {
     const [i, j] = edges[e];
     slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
     slot.edgePos[e*6+3] = nodePos[j*3];   slot.edgePos[e*6+4] = nodePos[j*3+1]; slot.edgePos[e*6+5] = nodePos[j*3+2];
-    // FIX: resting edge brightness was 0.08 — too invisible. Now 0.18.
     const dc = heatColor(Math.max(nodeE[i], nodeE[j])).multiplyScalar(0.18);
     for (let k = 0; k < 2; k++) {
       slot.edgeCol[(e*2+k)*3]   = dc.r;
@@ -214,7 +215,6 @@ function buildSlot(slot, manifold) {
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     cloud.setMatrixAt(i, dummy.matrix);
-    // FIX: was 0.20 — too dark. Now 0.55 so resting nodes are actually visible.
     nc.copy(heatColor(nodeE[i])).multiplyScalar(0.55);
     cloud.setColorAt(i, nc);
   }
@@ -259,6 +259,7 @@ function buildSlot(slot, manifold) {
 
   slot.manifold = { times, energy: rawE, rawPts, duration_s: dur, N };
   slot.smoothIdx = 0;
+  slot.prevClockTime = -1;
 }
 
 // ── Clock ──────────────────────────────────────────────────────────────────
@@ -271,11 +272,29 @@ function currentTime(slot) {
   return clockTime;
 }
 
-// Returns fractional node index for smooth EMA tracking
+/**
+ * fracNodeForTime — returns fractional node index for the current playback time.
+ *
+ * FIX: loop-wrap detection. When ct wraps back near 0 (i.e. the new tt is
+ * significantly less than the previous tt), we snap smoothIdx to 0 immediately
+ * instead of trying to EMA across the discontinuity. Without this the dot
+ * would lurch backwards across the whole manifold on every loop restart.
+ */
 function fracNodeForTime(slot, ct) {
   const { times, duration_s } = slot.manifold;
   const dur = duration_s ?? times[times.length - 1] ?? 10;
   const tt  = dur > 0 ? ct % dur : ct;
+
+  // Detect loop wrap: tt jumped back by more than half the duration
+  if (slot.prevClockTime >= 0) {
+    const prevTT = dur > 0 ? slot.prevClockTime % dur : slot.prevClockTime;
+    if (prevTT - tt > dur * 0.4) {
+      // Wrapped — snap smoothIdx to start so EMA doesn't drag across the seam
+      slot.smoothIdx = 0;
+    }
+  }
+  slot.prevClockTime = ct;
+
   let lo = 0, hi = times.length - 1;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < tt) lo = mid + 1; else hi = mid; }
   const rawIdx   = clamp(lo, 0, times.length - 1);
@@ -293,8 +312,6 @@ function tickSlot(slot) {
   const N  = NODE_COUNT;
   const ct = currentTime(slot);
 
-  // FIX: EMA factor was 0.06 — too slow, caused big lag then snap (jitter).
-  // 0.18 tracks the audio closely while still being visually smooth.
   const target   = fracNodeForTime(slot, ct);
   slot.smoothIdx = slot.smoothIdx + 0.18 * (target - slot.smoothIdx);
   const ani      = clamp(Math.round(slot.smoothIdx), 0, N - 1);

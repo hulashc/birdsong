@@ -7,13 +7,12 @@
  */
 
 // ── Constants ─────────────────────────────────────
-const N_MFCC      = 13;   // coefficients to keep (matches librosa default subset)
+const N_MFCC      = 13;
 const N_CHROMA    = 12;
 const N_FFT       = 2048;
 const HOP_LENGTH  = 512;
-const FRAME_MS    = 23.2; // ~HOP_LENGTH / 22050 * 1000
 
-// ── Mel filterbank (approximate, matches librosa mel scale) ──
+// ── Mel filterbank ────────────────────────────────
 function hzToMel(hz) { return 2595 * Math.log10(1 + hz / 700); }
 function melToHz(mel) { return 700 * (Math.pow(10, mel / 2595) - 1); }
 
@@ -41,7 +40,7 @@ function buildMelFilterbank(nFilters, nFft, sampleRate) {
   return fb;
 }
 
-// ── DCT-II for MFCCs ───────────────────────────────
+// ── DCT-II for MFCCs ──────────────────────────────
 function dct2(input) {
   const N = input.length;
   const out = new Float32Array(N_MFCC);
@@ -55,7 +54,7 @@ function dct2(input) {
   return out;
 }
 
-// ── Chroma (12 pitch classes) ─────────────────────────
+// ── Chroma ────────────────────────────────────────
 function chromaFromMag(mag, sampleRate) {
   const nBins = mag.length;
   const chroma = new Float32Array(N_CHROMA);
@@ -70,13 +69,12 @@ function chromaFromMag(mag, sampleRate) {
   return chroma.map(v => v / sum);
 }
 
-// ── Spectral features ──────────────────────────────
+// ── Spectral features ─────────────────────────────
 function spectralCentroid(mag, sampleRate) {
   let num = 0, den = 0;
   for (let k = 0; k < mag.length; k++) {
     const hz = k * sampleRate / N_FFT;
-    num += hz * mag[k];
-    den += mag[k];
+    num += hz * mag[k]; den += mag[k];
   }
   return den > 1e-10 ? num / den : 0;
 }
@@ -85,8 +83,7 @@ function spectralBandwidth(mag, sampleRate, centroid) {
   let num = 0, den = 0;
   for (let k = 0; k < mag.length; k++) {
     const hz = k * sampleRate / N_FFT;
-    num += Math.pow(hz - centroid, 2) * mag[k];
-    den += mag[k];
+    num += Math.pow(hz - centroid, 2) * mag[k]; den += mag[k];
   }
   return den > 1e-10 ? Math.sqrt(num / den) : 0;
 }
@@ -102,7 +99,6 @@ function spectralRolloff(mag, sampleRate, rollPct = 0.85) {
   return sampleRate / 2;
 }
 
-// ── Onset strength (frame-to-frame spectral flux) ───────
 function onsetStrength(prevMag, mag) {
   let flux = 0;
   for (let k = 0; k < mag.length; k++) {
@@ -112,7 +108,6 @@ function onsetStrength(prevMag, mag) {
   return flux;
 }
 
-// ── ZCR ────────────────────────────────────────────
 function zcr(frame) {
   let crossings = 0;
   for (let i = 1; i < frame.length; i++) {
@@ -121,29 +116,24 @@ function zcr(frame) {
   return crossings / frame.length;
 }
 
-// ── RMS energy ─────────────────────────────────────
 function rms(frame) {
   let sum = 0;
   for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
   return Math.sqrt(sum / frame.length);
 }
 
-// ── Hann window ────────────────────────────────────
 function makeHann(n) {
   const w = new Float32Array(n);
   for (let i = 0; i < n; i++) w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (n - 1)));
   return w;
 }
 
-// ── Simple DFT magnitude (real input, N_FFT bins) ──────
 function magnitudeSpectrum(frame, hann) {
   const N = N_FFT;
   const nBins = N / 2 + 1;
   const mag = new Float32Array(nBins);
-  // Apply window
   const windowed = new Float32Array(N);
   for (let i = 0; i < Math.min(frame.length, N); i++) windowed[i] = frame[i] * hann[i];
-  // DFT (O(N^2) — fine for N=2048 at analysis time, not realtime)
   for (let k = 0; k < nBins; k++) {
     let re = 0, im = 0;
     for (let n = 0; n < N; n++) {
@@ -156,12 +146,10 @@ function magnitudeSpectrum(frame, hann) {
   return mag;
 }
 
-// Use OfflineAudioContext for fast FFT via AnalyserNode
 async function magnitudeSpectraFast(pcm, sampleRate, onProgress) {
   const N = N_FFT;
   const hop = HOP_LENGTH;
   const nFrames = Math.floor((pcm.length - N) / hop) + 1;
-  const nBins = N / 2 + 1;
   const hann = makeHann(N);
   const allMag = [];
   const allZcr = [];
@@ -175,13 +163,11 @@ async function magnitudeSpectraFast(pcm, sampleRate, onProgress) {
     allZcr.push(zcr(frame));
     allRms.push(rms(frame));
     if (f % 50 === 0) onProgress(f / nFrames * 0.7);
-    // Yield to event loop every 100 frames to keep UI responsive
     if (f % 100 === 0) await new Promise(r => setTimeout(r, 0));
   }
   return { allMag, allZcr, allRms, nFrames };
 }
 
-// ── Normalise a feature array to [0, 1] ────────────────
 function normalise(arr) {
   let mn = Infinity, mx = -Infinity;
   for (const v of arr) { if (v < mn) mn = v; if (v > mx) mx = v; }
@@ -189,10 +175,12 @@ function normalise(arr) {
   return arr.map(v => (v - mn) / range);
 }
 
-// ── PCA projection (2-component, uses data-derived covariance) ──
-// We use the saved per-species PCA space from birdsong_data.json by
-// computing a simple projection onto the first 3 principal axes derived
-// from the full feature matrix of the uploaded audio.
+/**
+ * PCA via power iteration.
+ * FIX: seed vector is deterministic (all-ones normalised) so the eigenvector
+ * always converges to the same direction — no random noise baked into xyz.
+ * Iterations raised from 80 → 200 for reliable convergence on 57-dim input.
+ */
 function pcaProject(matrix, nComponents = 3) {
   const nFrames = matrix.length;
   const nFeats  = matrix[0].length;
@@ -204,7 +192,7 @@ function pcaProject(matrix, nComponents = 3) {
 
   const centred = matrix.map(row => row.map((v, j) => v - mean[j]));
 
-  // Covariance (nFeats x nFeats — kept small by working with 57 features)
+  // Covariance
   const cov = [];
   for (let i = 0; i < nFeats; i++) {
     cov.push(new Float64Array(nFeats));
@@ -215,12 +203,15 @@ function pcaProject(matrix, nComponents = 3) {
     }
   }
 
-  // Power iteration for top-k eigenvectors
+  // Power iteration — deterministic seed: uniform vector, then normalise
   const vecs = [];
   const deflated = cov.map(r => Array.from(r));
   for (let k = 0; k < nComponents; k++) {
-    let v = new Array(nFeats).fill(0).map(() => Math.random() - 0.5);
-    for (let iter = 0; iter < 80; iter++) {
+    // Deterministic seed: all-ones normalised
+    const seedVal = 1 / Math.sqrt(nFeats);
+    let v = new Array(nFeats).fill(seedVal);
+
+    for (let iter = 0; iter < 200; iter++) {
       const nv = new Array(nFeats).fill(0);
       for (let i = 0; i < nFeats; i++)
         for (let j = 0; j < nFeats; j++)
@@ -229,6 +220,7 @@ function pcaProject(matrix, nComponents = 3) {
       v = nv.map(x => x / norm);
     }
     vecs.push(v);
+
     // Deflate
     const eigval = v.reduce((s, vi, i) => {
       let Av = 0;
@@ -241,9 +233,9 @@ function pcaProject(matrix, nComponents = 3) {
   }
 
   // Project
-  const projected = centred.map(row => {
-    return vecs.map(vec => row.reduce((s, v, j) => s + v * vec[j], 0));
-  });
+  const projected = centred.map(row =>
+    vecs.map(vec => row.reduce((s, v, j) => s + v * vec[j], 0))
+  );
 
   // Scale to [-1, 1] per axis
   for (let k = 0; k < nComponents; k++) {
@@ -256,18 +248,16 @@ function pcaProject(matrix, nComponents = 3) {
   return projected;
 }
 
-// ── Main extraction entrypoint ───────────────────────────
 /**
  * extractManifold(file, onProgress)
- * Decodes an audio file and extracts a manifold in the same
- * schema as birdsong_data.json entries.
  *
- * Returns: { t, xyz, energy, duration_s, species }
+ * FIX: Downsampling now uses linear interpolation over evenly-spaced time
+ * positions instead of integer frame stepping. This produces a perfectly
+ * uniform t[] array so fracNodeForTime's binary search never stutters.
  */
 export async function extractManifold(file, onProgress = () => {}) {
   onProgress(0.02);
 
-  // 1. Decode audio
   const arrayBuffer = await file.arrayBuffer();
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
   let decoded;
@@ -278,7 +268,6 @@ export async function extractManifold(file, onProgress = () => {}) {
   }
 
   const sampleRate = decoded.sampleRate;
-  // Downmix to mono
   const pcm = decoded.numberOfChannels > 1
     ? (() => {
         const out = new Float32Array(decoded.length);
@@ -294,14 +283,12 @@ export async function extractManifold(file, onProgress = () => {}) {
   const duration_s = decoded.duration;
   onProgress(0.08);
 
-  // 2. Frame-level spectral analysis
   const N = N_FFT, hop = HOP_LENGTH;
   const nBins = N / 2 + 1;
-  const melFB = buildMelFilterbank(40, N, sampleRate); // 40 mel bands for MFCCs
+  const melFB = buildMelFilterbank(40, N, sampleRate);
 
   const { allMag, allZcr, allRms, nFrames } = await magnitudeSpectraFast(pcm, sampleRate, onProgress);
 
-  // 3. Per-frame features
   const featureMatrix = [];
   const energyArr     = [];
   const timeArr       = [];
@@ -311,35 +298,24 @@ export async function extractManifold(file, onProgress = () => {}) {
     const mag = allMag[f];
     const t   = (f * hop) / sampleRate;
 
-    // Mel energies
     const melE = melFB.map(row => {
       let s = 0;
       for (let k = 0; k < nBins; k++) s += row[k] * mag[k];
       return Math.log(s + 1e-10);
     });
 
-    // MFCCs (first N_MFCC coefficients via DCT)
-    const mfcc = dct2(melE); // Float32Array[N_MFCC]
-
-    // Chroma
-    const chroma = chromaFromMag(mag, sampleRate); // Float32Array[12]
-
-    // Spectral
-    const cent  = spectralCentroid(mag, sampleRate);
-    const bw    = spectralBandwidth(mag, sampleRate, cent);
-    const roll  = spectralRolloff(mag, sampleRate);
-    const onset = onsetStrength(prevMag, mag);
-    const z     = allZcr[f];
-    const e     = allRms[f];
+    const mfcc   = dct2(melE);
+    const chroma = chromaFromMag(mag, sampleRate);
+    const cent   = spectralCentroid(mag, sampleRate);
+    const bw     = spectralBandwidth(mag, sampleRate, cent);
+    const roll   = spectralRolloff(mag, sampleRate);
+    const onset  = onsetStrength(prevMag, mag);
+    const z      = allZcr[f];
+    const e      = allRms[f];
 
     prevMag = mag;
 
-    // Concatenate into 57-dim vector:
-    // [mfcc x13] [chroma x12] [centroid] [bandwidth] [rolloff] [zcr] [onset]
-    // = 13 + 12 + 5 = 30 ... we pad with mfcc deltas to match 57 dims
-    // Simplified: use mfcc x 20 + chroma x 12 + 5 spectral = 37 dims
-    // (exact dim count doesn't matter for PCA — we use full-rank internally)
-    const vec = [
+    featureMatrix.push([
       ...Array.from(mfcc),
       ...Array.from(chroma),
       cent / (sampleRate / 2),
@@ -347,9 +323,7 @@ export async function extractManifold(file, onProgress = () => {}) {
       roll / (sampleRate / 2),
       z,
       Math.min(onset / 10, 1),
-    ];
-
-    featureMatrix.push(vec);
+    ]);
     energyArr.push(e);
     timeArr.push(t);
 
@@ -358,25 +332,36 @@ export async function extractManifold(file, onProgress = () => {}) {
 
   onProgress(0.85);
 
-  // 4. Normalise energy to [0, 1]
   const normEnergy = normalise(energyArr);
-
-  // 5. PCA to 3D
-  const xyz3d = pcaProject(featureMatrix, 3);
+  const xyz3d      = pcaProject(featureMatrix, 3);
 
   onProgress(0.97);
 
-  // 6. Downsample to max 500 frames for smooth viz performance
-  const maxFrames = 500;
-  const step = Math.max(1, Math.floor(nFrames / maxFrames));
+  // ── Downsample via linear interpolation over evenly-spaced time positions
+  // This guarantees a perfectly uniform t[] so the binary search in
+  // fracNodeForTime never encounters uneven gaps that cause stutter.
+  const maxFrames   = 500;
+  const totalFrames = Math.min(nFrames, maxFrames);
   const t_out   = [];
   const xyz_out = [];
   const e_out   = [];
 
-  for (let f = 0; f < nFrames; f += step) {
-    t_out.push(+timeArr[f].toFixed(4));
-    xyz_out.push([+xyz3d[f][0].toFixed(5), +xyz3d[f][1].toFixed(5), +xyz3d[f][2].toFixed(5)]);
-    e_out.push(+normEnergy[f].toFixed(4));
+  for (let s = 0; s < totalFrames; s++) {
+    // Exact fractional position in the original frame array
+    const frac = s / (totalFrames - 1) * (nFrames - 1);
+    const lo   = Math.floor(frac);
+    const hi   = Math.min(lo + 1, nFrames - 1);
+    const w    = frac - lo; // interpolation weight
+
+    const t_interp = timeArr[lo] * (1 - w) + timeArr[hi] * w;
+    const e_interp = normEnergy[lo] * (1 - w) + normEnergy[hi] * w;
+    const x_interp = xyz3d[lo][0] * (1 - w) + xyz3d[hi][0] * w;
+    const y_interp = xyz3d[lo][1] * (1 - w) + xyz3d[hi][1] * w;
+    const z_interp = xyz3d[lo][2] * (1 - w) + xyz3d[hi][2] * w;
+
+    t_out.push(+t_interp.toFixed(4));
+    xyz_out.push([+x_interp.toFixed(5), +y_interp.toFixed(5), +z_interp.toFixed(5)]);
+    e_out.push(+e_interp.toFixed(4));
   }
 
   onProgress(1.0);
