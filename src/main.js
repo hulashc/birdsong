@@ -8,7 +8,7 @@ import { buildIndex, classify, distToSimilarity } from './knn.js';
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-renderer.setClearColor(0x0a0a0f, 1);
+renderer.setClearColor(0x04060d, 1);
 document.body.appendChild(renderer.domElement);
 
 const css2d = new CSS2DRenderer();
@@ -18,47 +18,42 @@ document.body.appendChild(css2d.domElement);
 
 // ── Scene / Camera ─────────────────────────────────────────────────────────
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.001, 200);
-camera.position.set(2.2, 1.5, 3.2);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.001, 200);
+camera.position.set(2.4, 1.8, 3.4);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping   = true;
-controls.dampingFactor   = 0.05;
+controls.dampingFactor   = 0.06;
 controls.autoRotate      = true;
-controls.autoRotateSpeed = 0.3;
-controls.minDistance     = 0.8;
-controls.maxDistance     = 10;
+controls.autoRotateSpeed = 0.25;
+controls.minDistance     = 0.5;
+controls.maxDistance     = 12;
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-// Neon palette: cool → hot as energy rises
-// primary   = teal/cyan → electric white
-// secondary = amber/gold → hot white
-function energyToColor(e, tint = 'primary') {
-  const t = clamp(e, 0, 1);
+// ── Colour map: cool dim blue → red → orange → yellow → white (heat) ──────
+function heatColor(e) {
+  const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
-  if (tint === 'secondary') {
-    // amber → gold → hot white
-    c.setRGB(0.6 + t * 0.4, 0.35 + t * 0.55, 0.0 + t * 0.9);
+  if (t < 0.25) {
+    // dim teal/blue → dark red
+    c.setRGB(t * 1.2, t * 0.2, 0.15 + t * 0.1);
+  } else if (t < 0.55) {
+    const s = (t - 0.25) / 0.30;
+    c.setRGB(0.3 + s * 0.7, s * 0.25, 0.05);
+  } else if (t < 0.80) {
+    const s = (t - 0.55) / 0.25;
+    c.setRGB(1.0, 0.25 + s * 0.55, s * 0.1);
   } else {
-    // deep blue → cyan → electric white
-    c.setRGB(0.0 + t * 0.85, 0.4 + t * 0.55, 0.7 + t * 0.3);
+    const s = (t - 0.80) / 0.20;
+    c.setRGB(1.0, 0.8 + s * 0.2, 0.1 + s * 0.9);
   }
   return c;
 }
 
-function glowColor(e, tint, brightness) {
-  const c = energyToColor(e, tint);
-  c.multiplyScalar(brightness);
-  return c;
+function dimColor(e, factor = 0.12) {
+  return heatColor(e).multiplyScalar(factor);
 }
 
-function smoothPoints(pts, divisions = 6) {
-  if (pts.length < 2) return pts.map(p => p.clone());
-  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
-  return curve.getPoints(pts.length * divisions);
-}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ── Error display ──────────────────────────────────────────────────────────
 function showError(msg) {
@@ -68,115 +63,178 @@ function showError(msg) {
   if (ov) ov.style.display = 'none';
 }
 
-// ── Axes ───────────────────────────────────────────────────────────────────
-function addAxis(a, b, hex, opacity = 0.10) {
+// ── Axes (very subtle) ─────────────────────────────────────────────────────
+function addAxis(a, b, hex, op = 0.08) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
-  const m = new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity });
-  scene.add(new THREE.Line(g, m));
+  scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
 }
-addAxis(new THREE.Vector3(-1.5,0,0), new THREE.Vector3(1.5,0,0), 0x441111, 0.18);
-addAxis(new THREE.Vector3(0,-1.5,0), new THREE.Vector3(0,1.5,0), 0x114411, 0.18);
-addAxis(new THREE.Vector3(0,0,-1.5), new THREE.Vector3(0,0,1.5), 0x111144, 0.18);
-for (const v of [-1, -0.5, 0.5, 1]) {
-  const t = 0.016;
-  addAxis(new THREE.Vector3(v,-t,0), new THREE.Vector3(v,t,0), 0x441111, 0.12);
-  addAxis(new THREE.Vector3(-t,v,0), new THREE.Vector3(t,v,0), 0x114411, 0.12);
-  addAxis(new THREE.Vector3(0,-t,v), new THREE.Vector3(0,t,v), 0x111144, 0.12);
-}
+addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0x331111, 0.12);
+addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x113311, 0.12);
+addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x111133, 0.12);
 
 function addAxisLabel(text, pos, col) {
   const el = document.createElement('div');
   el.textContent = text;
-  el.style.cssText = [
-    `color:${col}`, 'font-size:7px', 'letter-spacing:.3em',
-    'font-weight:700', 'text-transform:uppercase',
-    'font-family:Helvetica Neue,sans-serif', 'opacity:0.3', 'padding:1px 4px',
-  ].join(';');
+  el.style.cssText = `color:${col};font-size:7px;letter-spacing:.3em;font-weight:700;text-transform:uppercase;font-family:'Courier New',monospace;opacity:0.25;padding:1px 4px;`;
   const obj = new CSS2DObject(el);
   obj.position.copy(pos);
   scene.add(obj);
 }
-addAxisLabel('PC1', new THREE.Vector3(1.58, 0.04, 0), '#ff4444');
-addAxisLabel('PC2', new THREE.Vector3(0.04, 1.58, 0), '#44ff88');
-addAxisLabel('PC3', new THREE.Vector3(0.04, 0, 1.58), '#4488ff');
+addAxisLabel('PC1', new THREE.Vector3(1.64,0.04,0), '#ff3333');
+addAxisLabel('PC2', new THREE.Vector3(0.04,1.64,0), '#33ff88');
+addAxisLabel('PC3', new THREE.Vector3(0.04,0,1.64), '#3388ff');
 
-// ── Slot structure ─────────────────────────────────────────────────────────
-// WINDOW: fraction of smoothed path visible at once (behind + ahead of traveller)
-const WINDOW_BACK  = 0.06;  // 6% of path shown behind
-const WINDOW_AHEAD = 0.04;  // 4% of path shown ahead
-const TAIL_LEN     = 55;    // comet tail history frames
-const NODE_COUNT   = 72;    // point cloud nodes
+// ── Slot ───────────────────────────────────────────────────────────────────
+const NODE_COUNT   = 80;   // graph nodes
+const KNN_EDGES    = 3;    // edges per node (spatial neighbours)
+const TRAIL_HOPS   = 10;   // how many traversal steps to show as glowing trail
 
-function makeSlot(tint) {
+function makeSlot() {
   return {
-    tint, manifold: null,
+    manifold: null,
     audio: null, audioReady: false,
-    // Traveller sphere
-    dot: null, dotMat: null,
-    // Point cloud (InstancedMesh)
+    // Graph structures
+    nodes: null,        // Float32Array(N*3) of node positions
+    nodeEnergy: null,   // Float32Array(N)
+    nodeRawIdx: null,   // Int32Array(N) — which raw frame this node maps to
+    edges: null,        // Array of [i,j] pairs
+    edgeGeo: null, edgePos: null, edgeCol: null,
+    // Node sprites (InstancedMesh of small boxes)
     cloud: null,
-    // Rolling window arc (BufferGeometry line, updated each frame)
-    arcGeo: null, arcPos: null, arcCol: null, arcLine: null,
-    // Comet tail
-    tailGeo: null, tPos: null, tCol: null, tRaw: null,
+    // Labels (CSS2D) — sparse, only every Nth node
+    labels: [],
+    // Traversal trail
+    trail: [],          // ring buffer of node indices (last TRAIL_HOPS)
+    trailGeo: null, trailPos: null, trailCol: null,
+    // Active node halo (a single sphere around the active node)
+    halo: null, haloMat: null,
     objects: [],
+    labelObjects: [],
   };
 }
 
-const primary   = makeSlot('primary');
-const secondary = makeSlot('secondary');
+const primary   = makeSlot();
+const secondary = makeSlot();
 
-const SPHERE_GEO = new THREE.SphereGeometry(0.008, 8, 8);
+// Node geometry: small box (looks like reference screenshot squares)
+const NODE_GEO = new THREE.BoxGeometry(0.013, 0.013, 0.013);
+const HALO_GEO = new THREE.SphereGeometry(0.032, 16, 16);
 
 function disposeSlot(slot) {
   for (const obj of slot.objects) {
     scene.remove(obj);
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-      else obj.material.dispose();
+    obj.geometry?.dispose();
+    if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => m.dispose());
+  }
+  for (const obj of slot.labelObjects) scene.remove(obj);
+  slot.objects = []; slot.labelObjects = []; slot.labels = [];
+  slot.edgeGeo?.dispose(); slot.trailGeo?.dispose();
+  slot.edgeGeo = null; slot.trailGeo = null;
+  slot.manifold = null; slot.cloud = null; slot.halo = null;
+  slot.trail = [];
+}
+
+// ── Build KNN graph from node positions ────────────────────────────────────
+function buildEdges(positions, N, k) {
+  const edges = [];
+  for (let i = 0; i < N; i++) {
+    const ax = positions[i*3], ay = positions[i*3+1], az = positions[i*3+2];
+    const dists = [];
+    for (let j = 0; j < N; j++) {
+      if (i === j) continue;
+      const dx = ax - positions[j*3], dy = ay - positions[j*3+1], dz = az - positions[j*3+2];
+      dists.push([j, dx*dx + dy*dy + dz*dz]);
+    }
+    dists.sort((a, b) => a[1] - b[1]);
+    for (let ki = 0; ki < Math.min(k, dists.length); ki++) {
+      const j = dists[ki][0];
+      if (j > i) edges.push([i, j]); // avoid duplicates
     }
   }
-  slot.objects = [];
-  if (slot.tailGeo) { slot.tailGeo.dispose(); slot.tailGeo = null; }
-  if (slot.arcGeo)  { slot.arcGeo.dispose();  slot.arcGeo  = null; }
-  slot.manifold = null;
-  slot.cloud = null; slot.arcLine = null;
+  return edges;
 }
 
 function buildSlot(slot, manifold) {
   disposeSlot(slot);
-  const rawPts = manifold.xyz.map(([x,y,z]) => new THREE.Vector3(x,y,z));
-  const points = smoothPoints(rawPts, 6);
-  const energy = manifold.energy || [];
-  const times  = manifold.t;
-  const N      = points.length;
 
-  // ── 1. Point cloud ──
-  const cloudMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
-  // We'll set per-instance colour via instanceColor
-  cloudMat.vertexColors = true;
-  cloudMat.opacity = 1; // controlled per-instance via colour brightness
-  const cloud = new THREE.InstancedMesh(SPHERE_GEO, cloudMat, NODE_COUNT);
-  cloud.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  if (!cloud.instanceColor) {
-    cloud.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(NODE_COUNT * 3), 3);
+  const rawPts  = manifold.xyz.map(([x,y,z]) => new THREE.Vector3(x,y,z));
+  const rawE    = manifold.energy || [];
+  const times   = manifold.t;
+  const dur     = manifold.duration_s ?? times[times.length - 1] ?? 10;
+  const spectral = manifold.spectral_centroid || [];
+
+  // Sample N evenly-spaced nodes from raw frames
+  const N        = NODE_COUNT;
+  const step     = (rawPts.length - 1) / (N - 1);
+  const nodePos  = new Float32Array(N * 3);
+  const nodeE    = new Float32Array(N);
+  const nodeRaw  = new Int32Array(N);
+  const nodeSC   = new Float32Array(N);
+
+  for (let i = 0; i < N; i++) {
+    const ri = Math.round(i * step);
+    const p  = rawPts[ri];
+    nodePos[i*3]   = p.x;
+    nodePos[i*3+1] = p.y;
+    nodePos[i*3+2] = p.z;
+    nodeE[i]   = rawE[ri] ?? 0;
+    nodeRaw[i] = ri;
+    nodeSC[i]  = spectral[ri] ?? 0;
   }
 
-  const dummy     = new THREE.Object3D();
-  const nodeStep  = Math.floor(rawPts.length / NODE_COUNT);
-  const nodeColor = new THREE.Color();
+  slot.nodes      = nodePos;
+  slot.nodeEnergy = nodeE;
+  slot.nodeRawIdx = nodeRaw;
 
-  for (let i = 0; i < NODE_COUNT; i++) {
-    const ri = Math.min(i * nodeStep, rawPts.length - 1);
-    const p  = rawPts[ri];
-    const e  = energy[ri] ?? 0;
-    dummy.position.copy(p);
+  // Build spatial KNN edges
+  const edges = buildEdges(nodePos, N, KNN_EDGES);
+  slot.edges  = edges;
+
+  // ── Edge lines (all edges rendered dim, active edges brighten per-frame) ──
+  // We allocate max possible: N * KNN_EDGES * 2 points
+  const maxEdgePts = edges.length * 2;
+  slot.edgePos = new Float32Array(maxEdgePts * 3);
+  slot.edgeCol = new Float32Array(maxEdgePts * 3);
+  slot.edgeGeo = new THREE.BufferGeometry();
+  slot.edgeGeo.setAttribute('position', new THREE.BufferAttribute(slot.edgePos, 3));
+  slot.edgeGeo.setAttribute('color',    new THREE.BufferAttribute(slot.edgeCol, 3));
+  slot.edgeGeo.setDrawRange(0, maxEdgePts);
+
+  // Fill edge positions (static) and dim colours (updated per-frame)
+  for (let e = 0; e < edges.length; e++) {
+    const [i, j] = edges[e];
+    slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
+    slot.edgePos[e*6+3] = nodePos[j*3];   slot.edgePos[e*6+4] = nodePos[j*3+1]; slot.edgePos[e*6+5] = nodePos[j*3+2];
+    const dc = dimColor(Math.max(nodeE[i], nodeE[j]), 0.08);
+    for (let k = 0; k < 2; k++) {
+      slot.edgeCol[(e*2+k)*3]   = dc.r;
+      slot.edgeCol[(e*2+k)*3+1] = dc.g;
+      slot.edgeCol[(e*2+k)*3+2] = dc.b;
+    }
+  }
+  slot.edgeGeo.attributes.position.needsUpdate = true;
+  slot.edgeGeo.attributes.color.needsUpdate    = true;
+
+  const edgeMat  = new THREE.LineSegmentsMaterial ? undefined : undefined;
+  const edgeLine = new THREE.LineSegments(slot.edgeGeo,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 }));
+  scene.add(edgeLine);
+  slot.objects.push(edgeLine);
+
+  // ── Node cloud (InstancedMesh of boxes) ──
+  const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const cloud    = new THREE.InstancedMesh(NODE_GEO, cloudMat, N);
+  cloud.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  cloud.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  const dummy = new THREE.Object3D();
+  const nc    = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    dummy.position.set(nodePos[i*3], nodePos[i*3+1], nodePos[i*3+2]);
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     cloud.setMatrixAt(i, dummy.matrix);
-    nodeColor.copy(glowColor(e, slot.tint, 0.08)); // very dim by default
-    cloud.setColorAt(i, nodeColor);
+    nc.copy(dimColor(nodeE[i], 0.20));
+    cloud.setColorAt(i, nc);
   }
   cloud.instanceMatrix.needsUpdate = true;
   cloud.instanceColor.needsUpdate  = true;
@@ -184,184 +242,176 @@ function buildSlot(slot, manifold) {
   slot.cloud = cloud;
   slot.objects.push(cloud);
 
-  // ── 2. Rolling arc line ── (MAX_ARC_PTS covers WINDOW_BACK + WINDOW_AHEAD)
-  const MAX_ARC = Math.ceil((WINDOW_BACK + WINDOW_AHEAD) * N) + 4;
-  slot.arcPos = new Float32Array(MAX_ARC * 3);
-  slot.arcCol = new Float32Array(MAX_ARC * 3);
-  slot.arcGeo = new THREE.BufferGeometry();
-  slot.arcGeo.setAttribute('position', new THREE.BufferAttribute(slot.arcPos, 3));
-  slot.arcGeo.setAttribute('color',    new THREE.BufferAttribute(slot.arcCol, 3));
-  slot.arcGeo.setDrawRange(0, 0);
-  const arcMat  = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
-  const arcLine = new THREE.Line(slot.arcGeo, arcMat);
-  scene.add(arcLine);
-  slot.arcLine = arcLine;
-  slot.objects.push(arcLine);
+  // ── Sparse data labels (every 8th node) ──
+  const LABEL_EVERY = 8;
+  for (let i = 0; i < N; i += LABEL_EVERY) {
+    const e  = nodeE[i];
+    const sc = nodeSC[i];
+    const el = document.createElement('div');
+    el.className = 'node-label';
+    el.innerHTML =
+      `<span class="nl-e">${e.toFixed(4)}</span>` +
+      `<span class="nl-sc">${sc > 0 ? (sc / 1000).toFixed(2) + 'k' : ''}</span>`;
+    const css = new CSS2DObject(el);
+    css.position.set(nodePos[i*3], nodePos[i*3+1] + 0.025, nodePos[i*3+2]);
+    scene.add(css);
+    slot.labels.push({ css, el, nodeIdx: i });
+    slot.labelObjects.push(css);
+  }
 
-  // ── 3. Traveller dot ──
-  const dotGeo = new THREE.SphereGeometry(0.018, 20, 20);
-  slot.dotMat  = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  slot.dot     = new THREE.Mesh(dotGeo, slot.dotMat);
-  scene.add(slot.dot);
-  slot.objects.push(slot.dot);
+  // ── Halo (active node indicator) ──
+  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, wireframe: true });
+  slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
+  scene.add(slot.halo);
+  slot.objects.push(slot.halo);
 
-  // ── 4. Comet tail ──
-  slot.tPos = new Float32Array(TAIL_LEN * 3);
-  slot.tCol = new Float32Array(TAIL_LEN * 3);
-  slot.tRaw = new Float32Array(TAIL_LEN * 3);
-  slot.tailGeo = new THREE.BufferGeometry();
-  slot.tailGeo.setAttribute('position', new THREE.BufferAttribute(slot.tPos, 3));
-  slot.tailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.tCol, 3));
-  const tailLine = new THREE.Line(slot.tailGeo,
+  // ── Traversal trail ──
+  const trailPts  = TRAIL_HOPS * 2; // segments between consecutive hops
+  slot.trailPos   = new Float32Array(trailPts * 3);
+  slot.trailCol   = new Float32Array(trailPts * 3);
+  slot.trailGeo   = new THREE.BufferGeometry();
+  slot.trailGeo.setAttribute('position', new THREE.BufferAttribute(slot.trailPos, 3));
+  slot.trailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.trailCol, 3));
+  slot.trailGeo.setDrawRange(0, 0);
+  const trailLine = new THREE.LineSegments(slot.trailGeo,
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 }));
-  scene.add(tailLine);
-  slot.objects.push(tailLine);
+  scene.add(trailLine);
+  slot.objects.push(trailLine);
 
-  slot.manifold = { times, energy, points, rawPts, duration_s: manifold.duration_s, N };
+  slot.manifold = { times, energy: rawE, rawPts, duration_s: dur, N };
 }
 
-// ── Arc update (called each frame) ────────────────────────────────────────
-function updateArc(slot, headIdx) {
-  const { manifold, arcPos, arcCol, arcGeo, tint } = slot;
-  const { points, energy, N, rawPts } = manifold;
-
-  const back  = Math.ceil(WINDOW_BACK  * N);
-  const ahead = Math.ceil(WINDOW_AHEAD * N);
-
-  const startIdx = Math.max(0, headIdx - back);
-  const endIdx   = Math.min(N - 1, headIdx + ahead);
-  const count    = endIdx - startIdx + 1;
-
-  for (let j = 0; j < count; j++) {
-    const idx = startIdx + j;
-    const p   = points[idx];
-    arcPos[j*3]   = p.x;
-    arcPos[j*3+1] = p.y;
-    arcPos[j*3+2] = p.z;
-
-    // Distance from head: 0 = head, positive = behind, negative = ahead
-    const dist    = headIdx - idx;           // + behind, - ahead
-    const normDist = Math.abs(dist) / Math.max(back, ahead);
-
-    // Behind: bright centre → dim tail; Ahead: fainter ghost
-    let brightness;
-    if (dist >= 0) {
-      // behind: sharp falloff
-      brightness = Math.pow(1 - normDist, 2.2) * 0.95;
-    } else {
-      // ahead: very faint — just enough to show where we're going
-      brightness = (1 - normDist) * 0.18;
-    }
-
-    const ri = Math.floor((idx / N) * rawPts.length);
-    const e  = energy[ri] ?? 0;
-    const c  = glowColor(e, tint, brightness);
-    arcCol[j*3]   = c.r;
-    arcCol[j*3+1] = c.g;
-    arcCol[j*3+2] = c.b;
-  }
-
-  arcGeo.setDrawRange(0, count);
-  arcGeo.attributes.position.needsUpdate = true;
-  arcGeo.attributes.color.needsUpdate    = true;
-}
-
-// ── Comet tail ─────────────────────────────────────────────────────────────
-function pushTail(slot, pos, e) {
-  const { tPos, tCol, tRaw, tailGeo, tint } = slot;
-  // Shift history back
-  for (let j = TAIL_LEN - 1; j > 0; j--) {
-    tPos[j*3]   = tPos[(j-1)*3];   tPos[j*3+1] = tPos[(j-1)*3+1]; tPos[j*3+2] = tPos[(j-1)*3+2];
-    tRaw[j*3]   = tRaw[(j-1)*3];   tRaw[j*3+1] = tRaw[(j-1)*3+1]; tRaw[j*3+2] = tRaw[(j-1)*3+2];
-  }
-  tPos[0] = pos.x; tPos[1] = pos.y; tPos[2] = pos.z;
-  const c = glowColor(e, tint, 1.2);
-  tRaw[0] = c.r; tRaw[1] = c.g; tRaw[2] = c.b;
-  for (let j = 0; j < TAIL_LEN; j++) {
-    // Sharp exponential fade
-    const f = Math.pow(1 - j / TAIL_LEN, 2.8);
-    tCol[j*3] = tRaw[j*3]*f; tCol[j*3+1] = tRaw[j*3+1]*f; tCol[j*3+2] = tRaw[j*3+2]*f;
-  }
-  tailGeo.attributes.position.needsUpdate = true;
-  tailGeo.attributes.color.needsUpdate    = true;
-}
-
-// ── Point cloud pulse ──────────────────────────────────────────────────────
-const _dummy = new THREE.Object3D();
-const _nc    = new THREE.Color();
-
-function pulseCloud(slot, headRawIdx, e) {
-  const { cloud, manifold, tint } = slot;
-  if (!cloud) return;
-  const rawLen  = manifold.rawPts.length;
-  const nodeStep = Math.floor(rawLen / NODE_COUNT);
-
-  for (let n = 0; n < NODE_COUNT; n++) {
-    const ni       = Math.min(n * nodeStep, rawLen - 1);
-    const ne       = manifold.energy[ni] ?? 0;
-    const nodeDist = Math.abs(ni - headRawIdx) / rawLen; // 0–1
-
-    // Nodes within ~8% of current position glow; rest are near-invisible
-    const proximity = Math.max(0, 1 - nodeDist * 12);
-    const bright    = proximity > 0
-      ? 0.08 + proximity * (1.6 + e * 1.2)  // glow up to ~2.8x
-      : 0.04;                                 // almost invisible otherwise
-
-    const nodeSize = 0.8 + ne * 0.6 + (proximity > 0.5 ? proximity * 0.8 : 0);
-
-    cloud.getMatrixAt(n, _dummy.matrix);
-    _dummy.matrix.decompose(_dummy.position, _dummy.quaternion, _dummy.scale);
-    _dummy.scale.set(nodeSize, nodeSize, nodeSize);
-    _dummy.updateMatrix();
-    cloud.setMatrixAt(n, _dummy.matrix);
-
-    _nc.copy(glowColor(ne, tint, bright));
-    cloud.setColorAt(n, _nc);
-  }
-  cloud.instanceMatrix.needsUpdate = true;
-  cloud.instanceColor.needsUpdate  = true;
-}
-
-// ── Timing: use audio.currentTime directly, fallback to clock ─────────────
+// ── Timing ─────────────────────────────────────────────────────────────────
 let clockTime = 0, lastTS = null;
 
 function currentTime(slot) {
-  if (slot.audioReady && slot.audio && !slot.audio.paused) {
-    return slot.audio.currentTime;
-  }
+  if (slot.audioReady && slot.audio && !slot.audio.paused) return slot.audio.currentTime;
   return clockTime;
 }
 
-function indexForTime(slot, ct) {
-  if (!slot.manifold) return 0;
-  const { times, N, duration_s } = slot.manifold;
+function nodeForTime(slot, ct) {
+  const { times, duration_s, N } = slot.manifold;
   const dur = duration_s ?? times[times.length - 1] ?? 10;
   const tt  = dur > 0 ? ct % dur : ct;
-
-  // Binary search on times array
   let lo = 0, hi = times.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (times[mid] < tt) lo = mid + 1; else hi = mid;
-  }
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < tt) lo = mid + 1; else hi = mid; }
   const rawIdx = clamp(lo, 0, times.length - 1);
-  // Map raw frame → smoothed point index
-  return Math.floor((rawIdx / times.length) * N);
+  // Find nearest node to this raw frame
+  const nodeStep = (times.length - 1) / (NODE_COUNT - 1);
+  return clamp(Math.round(rawIdx / nodeStep), 0, NODE_COUNT - 1);
+}
+
+// ── Per-frame update ───────────────────────────────────────────────────────
+const _d  = new THREE.Object3D();
+const _c  = new THREE.Color();
+
+function tickSlot(slot) {
+  if (!slot.manifold || !slot.cloud) return;
+  const { nodes, nodeEnergy, edges } = slot;
+  const N   = NODE_COUNT;
+  const ct  = currentTime(slot);
+  const ani = nodeForTime(slot, ct); // active node index
+  const ae  = nodeEnergy[ani];
+
+  // Find direct neighbours of active node
+  const neighbours = new Set();
+  for (const [i, j] of edges) {
+    if (i === ani) neighbours.add(j);
+    if (j === ani) neighbours.add(i);
+  }
+
+  // ── Update node cloud ──
+  for (let i = 0; i < N; i++) {
+    const e  = nodeEnergy[i];
+    const isActive = i === ani;
+    const isNeighbour = neighbours.has(i);
+    const bright = isActive ? 4.5 + ae * 3.0
+                 : isNeighbour ? 1.2 + e * 1.8
+                 : 0.15 + e * 0.08;
+    const scale  = isActive ? 2.8 + ae * 2.0
+                 : isNeighbour ? 1.4 + e * 0.6
+                 : 0.7 + e * 0.4;
+    _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
+    _d.scale.set(scale, scale, scale);
+    _d.updateMatrix();
+    slot.cloud.setMatrixAt(i, _d.matrix);
+    _c.copy(heatColor(e)).multiplyScalar(bright);
+    slot.cloud.setColorAt(i, _c);
+  }
+  slot.cloud.instanceMatrix.needsUpdate = true;
+  slot.cloud.instanceColor.needsUpdate  = true;
+
+  // ── Update edge colours — active edges blaze ──
+  const { edgeCol, edgeGeo } = slot;
+  for (let ei = 0; ei < edges.length; ei++) {
+    const [i, j] = edges[ei];
+    const isActiveEdge = i === ani || j === ani;
+    const bright = isActiveEdge ? 1.8 + ae * 2.0 : 0.07;
+    const e      = Math.max(nodeEnergy[i], nodeEnergy[j]);
+    const c2     = heatColor(e);
+    c2.multiplyScalar(bright);
+    for (let k = 0; k < 2; k++) {
+      edgeCol[(ei*2+k)*3]   = c2.r;
+      edgeCol[(ei*2+k)*3+1] = c2.g;
+      edgeCol[(ei*2+k)*3+2] = c2.b;
+    }
+  }
+  edgeGeo.attributes.color.needsUpdate = true;
+
+  // ── Halo ──
+  slot.halo.position.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
+  const hs = 1.0 + ae * 1.4;
+  slot.halo.scale.set(hs, hs, hs);
+  slot.haloMat.opacity = 0.35 + ae * 0.45;
+  slot.haloMat.color   = heatColor(ae);
+
+  // ── Label visibility: highlight label nearest active node ──
+  for (const { css, el, nodeIdx } of slot.labels) {
+    const dist = Math.abs(nodeIdx - ani) / N;
+    const active = dist < 0.06;
+    el.style.opacity = active ? '0.85' : '0.18';
+    el.style.color   = active ? '#' + heatColor(nodeEnergy[nodeIdx]).getHexString() : '#334455';
+  }
+
+  // ── Traversal trail ──
+  // Push ani into trail ring
+  if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
+  if (slot.trail.length > TRAIL_HOPS + 1) slot.trail.shift();
+
+  const tLen = slot.trail.length;
+  const segs = Math.max(0, tLen - 1);
+  const { trailPos, trailCol, trailGeo } = slot;
+  for (let s = 0; s < segs; s++) {
+    const a  = slot.trail[s],   b = slot.trail[s + 1];
+    const ea = nodeEnergy[a],  eb = nodeEnergy[b];
+    const f  = (s + 1) / segs;           // 0=oldest, 1=newest
+    const bright = Math.pow(f, 1.5) * 3.2;
+
+    trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
+    trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
+
+    _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.5));
+    trailCol[s*6+0] = _c.r; trailCol[s*6+1] = _c.g; trailCol[s*6+2] = _c.b;
+    _c.copy(heatColor(eb)).multiplyScalar(bright);
+    trailCol[s*6+3] = _c.r; trailCol[s*6+4] = _c.g; trailCol[s*6+5] = _c.b;
+  }
+  trailGeo.setDrawRange(0, segs * 2);
+  trailGeo.attributes.position.needsUpdate = true;
+  trailGeo.attributes.color.needsUpdate    = true;
 }
 
 // ── Audio helpers ──────────────────────────────────────────────────────────
 function loadAudioForSlot(slot, key) {
   if (slot.audio) { slot.audio.pause(); slot.audio.src = ''; }
   slot.audioReady = false;
-  const candidates = [`./birds/${key}.ogg`, `./birds/${key}.mp3`];
-  let idx = 0;
   const audio = new Audio();
-  audio.loop = true;
-  slot.audio = audio;
+  audio.loop   = true;
+  slot.audio   = audio;
+  let idx = 0;
+  const cands = [`./birds/${key}.ogg`, `./birds/${key}.mp3`];
   function tryNext() {
-    if (idx >= candidates.length) { console.warn(`[birdsong] no audio for "${key}"`); return; }
-    audio.src = candidates[idx++];
-    audio.load();
+    if (idx >= cands.length) return;
+    audio.src = cands[idx++]; audio.load();
   }
   audio.addEventListener('canplaythrough', () => {
     slot.audioReady = true;
@@ -377,13 +427,10 @@ try {
   const res = await fetch('./birdsong_data.json');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   allData = await res.json();
-} catch (err) {
-  showError(`Failed to load data: ${err.message}`);
-  throw err;
-}
+} catch (err) { showError(`Failed to load data: ${err.message}`); throw err; }
 
-const isSingle    = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
-const speciesMap  = isSingle ? { [(allData.species || 'birdsong')]: allData } : allData;
+const isSingle   = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
+const speciesMap = isSingle ? { [(allData.species || 'birdsong')]: allData } : allData;
 const speciesKeys = Object.keys(speciesMap);
 if (!speciesKeys.length) { showError('birdsong_data.json is empty.'); throw new Error('Empty'); }
 
@@ -393,16 +440,14 @@ const knnIndex = buildIndex(speciesMap);
 const select = document.getElementById('speciesSelect');
 select.innerHTML = '';
 for (const key of speciesKeys) {
-  const opt = document.createElement('option');
-  opt.value = key;
-  opt.textContent = key.replace(/_/g, ' ');
-  select.appendChild(opt);
+  const opt = document.createElement('option'); opt.value = key;
+  opt.textContent = key.replace(/_/g, ' '); select.appendChild(opt);
 }
 
 function setTitleLabels(name) {
-  const pretty = name.replace(/_/g, ' ').toUpperCase();
-  document.getElementById('titleSpecies').textContent = pretty;
-  document.getElementById('label').textContent = pretty + ' · Spatiotemporal Acoustic Manifold';
+  const p = name.replace(/_/g,' ').toUpperCase();
+  document.getElementById('titleSpecies').textContent = p;
+  document.getElementById('label').textContent = p + ' · Spatiotemporal Acoustic Manifold';
 }
 
 function updateManifoldLegend() {
@@ -411,7 +456,6 @@ function updateManifoldLegend() {
   document.getElementById('legend-primary').textContent = select.value.replace(/_/g,' ');
 }
 
-// ── K-NN panel ─────────────────────────────────────────────────────────────
 function showKnnResults(results) {
   const panel = document.getElementById('knn-results');
   const list  = document.getElementById('knn-list');
@@ -419,18 +463,11 @@ function showKnnResults(results) {
   list.innerHTML = '';
   results.forEach(({ species, distance, rank }) => {
     const pct = distToSimilarity(distance);
-    const row = document.createElement('div');
-    row.className = 'knn-row';
-    row.innerHTML = `
-      <span class="knn-rank">${rank}</span>
-      <span class="knn-species">${species.replace(/_/g, ' ')}</span>
-      <span class="knn-pct">${pct}%</span>
-    `;
-    const bar = document.createElement('div');
-    bar.className = 'knn-bar';
+    const row = document.createElement('div'); row.className = 'knn-row';
+    row.innerHTML = `<span class="knn-rank">${rank}</span><span class="knn-species">${species.replace(/_/g,' ')}</span><span class="knn-pct">${pct}%</span>`;
+    const bar = document.createElement('div'); bar.className = 'knn-bar';
     bar.innerHTML = `<div class="knn-bar-fill" style="width:${pct}%"></div>`;
-    list.appendChild(row);
-    list.appendChild(bar);
+    list.appendChild(row); list.appendChild(bar);
   });
   panel.style.display = 'block';
 }
@@ -452,14 +489,10 @@ function loadSpecies(key) {
 
 loadSpecies(speciesKeys[0]);
 select.value = speciesKeys[0];
-select.addEventListener('change', () => {
-  if (primary.audio) primary.audio.pause();
-  loadSpecies(select.value);
-});
+select.addEventListener('change', () => { if (primary.audio) primary.audio.pause(); loadSpecies(select.value); });
 
 // ── Overlay / Pause ────────────────────────────────────────────────────────
 let started = false, paused = false;
-
 const overlay   = document.getElementById('overlay');
 const playBtn   = document.getElementById('playBtn');
 const modeBadge = document.getElementById('mode-badge');
@@ -474,11 +507,10 @@ overlay.addEventListener('click', () => {
   if (secondary.audio) secondary.audio.play().catch(() => {});
 }, { once: true });
 
-playBtn.addEventListener('click', (e) => {
+playBtn.addEventListener('click', e => {
   e.stopPropagation();
   if (!paused) {
-    primary.audio?.pause();
-    secondary.audio?.pause();
+    primary.audio?.pause(); secondary.audio?.pause();
     paused = true; playBtn.textContent = 'Resume';
   } else {
     primary.audio?.play().catch(() => {});
@@ -494,8 +526,7 @@ initUpload({
     if (secondary.audio) { secondary.audio.pause(); secondary.audio.src = ''; }
     secondary.audioReady = false;
     const audio = new Audio(URL.createObjectURL(file));
-    audio.loop = true;
-    secondary.audio = audio;
+    audio.loop = true; secondary.audio = audio;
     audio.addEventListener('canplaythrough', () => {
       secondary.audioReady = true;
       if (started && !paused) audio.play().catch(() => {});
@@ -509,33 +540,7 @@ initUpload({
   onProgress() {},
 });
 
-// ── Animation loop ─────────────────────────────────────────────────────────
-function tickSlot(slot) {
-  if (!slot.manifold) return;
-  const { points, energy, rawPts, N } = slot.manifold;
-
-  const ct  = currentTime(slot);
-  const i   = indexForTime(slot, ct);          // smoothed index
-  const ri  = Math.floor((i / N) * rawPts.length); // raw index for energy
-  const e   = energy[ri] ?? 0;
-  const pos = points[i];
-
-  // Traveller
-  slot.dot.position.copy(pos);
-  slot.dotMat.color = glowColor(e, slot.tint, 2.2 + e * 1.5); // always bright
-  const ds = 1.0 + e * 1.8;
-  slot.dot.scale.set(ds, ds, ds);
-
-  // Rolling arc
-  updateArc(slot, i);
-
-  // Point cloud pulse
-  pulseCloud(slot, ri, e);
-
-  // Comet tail
-  pushTail(slot, pos, e);
-}
-
+// ── Animation ─────────────────────────────────────────────────────────────
 function animate(ts) {
   requestAnimationFrame(animate);
   controls.update();
