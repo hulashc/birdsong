@@ -1,27 +1,16 @@
 // upload.js — drag-and-drop / file picker UI that calls extractManifold()
-// and returns the manifold to a callback.
-
 import { extractManifold } from './features.js';
 
 export function initUpload({ onManifold, onError, onProgress }) {
-  const panel = document.getElementById('upload-panel');
-  const dropzone = document.getElementById('dropzone');
-  const fileInput = document.getElementById('audioFileInput');
-  const statusEl = document.getElementById('upload-status');
+  const dropzone   = document.getElementById('dropzone');
+  const fileInput  = document.getElementById('audioFileInput');
+  const statusEl   = document.getElementById('upload-status');
   const progressBar = document.getElementById('upload-progress-bar');
-
-  if (!panel) return;
-
-  function showPanel() { panel.style.display = 'block'; }
-
-  document.getElementById('overlay')?.addEventListener('click', () => {
-    setTimeout(showPanel, 1000);
-  }, { once: true });
 
   function setStatus(msg, isError = false) {
     if (!statusEl) return;
     statusEl.textContent = msg;
-    statusEl.style.color = isError ? 'rgba(255,100,80,0.9)' : 'rgba(255,255,255,0.5)';
+    statusEl.style.color = isError ? 'rgba(255,100,80,0.9)' : 'rgba(255,255,255,0.3)';
   }
 
   function setProgress(pct) {
@@ -50,7 +39,7 @@ export function initUpload({ onManifold, onError, onProgress }) {
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       audioCtx.close();
 
-      setStatus('Extracting features (MFCC, Chroma, PCA)…');
+      setStatus('Extracting features…');
       setProgress(40);
       onProgress?.('extracting');
 
@@ -59,9 +48,8 @@ export function initUpload({ onManifold, onError, onProgress }) {
       const manifold = await extractManifold(audioBuffer, speciesName);
 
       setProgress(100);
-      setStatus(`Loaded: ${speciesName.replace(/_/g, ' ')}`);
+      setStatus(`\u2713 ${speciesName.replace(/_/g, ' ')}`);
       onProgress?.('done');
-
       onManifold?.(manifold, file);
     } catch (err) {
       console.error(err);
@@ -76,6 +64,10 @@ export function initUpload({ onManifold, onError, onProgress }) {
   });
 
   dropzone?.addEventListener('click', () => fileInput?.click());
+
+  dropzone?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput?.click(); }
+  });
 
   dropzone?.addEventListener('dragover', e => {
     e.preventDefault();

@@ -11,12 +11,13 @@
     body {
       background: #050508;
       color: #fff;
-      font-family: 'Helvetica Neue', sans-serif;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
       overflow: hidden;
     }
 
     canvas { display: block; }
 
+    /* ── Overlay ── */
     #overlay {
       position: fixed; inset: 0; z-index: 20;
       display: flex; flex-direction: column;
@@ -26,138 +27,223 @@
     }
     #overlay.hidden { opacity: 0; pointer-events: none; }
     #overlay h1 {
-      font-size: clamp(14px, 2vw, 20px);
-      letter-spacing: 0.3em; text-transform: uppercase;
+      font-size: clamp(13px, 1.8vw, 18px);
+      letter-spacing: 0.35em; text-transform: uppercase;
       color: #fff; font-weight: 300; margin-bottom: 6px;
     }
     #overlay p {
-      font-size: clamp(10px, 1.2vw, 13px);
-      letter-spacing: 0.2em; color: #555;
+      font-size: clamp(9px, 1.1vw, 12px);
+      letter-spacing: 0.22em; color: #444;
       text-transform: uppercase; margin-bottom: 48px;
     }
+    #overlay .start-hint {
+      font-size: 9px; letter-spacing: 0.2em;
+      text-transform: uppercase; color: #333;
+      margin-top: 18px;
+    }
     #overlay .start-ring {
-      width: 80px; height: 80px; border-radius: 50%;
-      border: 1px solid rgba(255,255,255,0.25);
+      width: 72px; height: 72px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.18);
       display: flex; align-items: center; justify-content: center;
       transition: border-color 0.3s;
     }
-    #overlay:hover .start-ring { border-color: rgba(255,255,255,0.7); }
-    #overlay .start-ring svg { width: 22px; height: 22px; fill: #fff; opacity: 0.8; }
+    #overlay:hover .start-ring { border-color: rgba(255,255,255,0.6); }
+    #overlay .start-ring svg { width: 20px; height: 20px; fill: #fff; opacity: 0.75; }
 
+    /* ── Bottom UI bar ── */
     #ui {
-      position: fixed; bottom: 32px; left: 50%;
+      position: fixed; bottom: 28px; left: 50%;
       transform: translateX(-50%); z-index: 10;
-      display: flex; align-items: center; gap: 20px;
+      display: flex; align-items: center; gap: 18px;
       pointer-events: none;
     }
     #label {
       font-size: 10px; letter-spacing: 0.25em;
-      text-transform: uppercase; color: rgba(255,255,255,0.4);
+      text-transform: uppercase; color: rgba(255,255,255,0.3);
     }
     #playBtn {
       pointer-events: all; background: none;
-      border: 1px solid rgba(255,255,255,0.2);
-      color: rgba(255,255,255,0.6); border-radius: 20px;
-      padding: 6px 20px; font-size: 10px;
-      letter-spacing: 0.2em; text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.5); border-radius: 20px;
+      padding: 5px 18px; font-size: 9px;
+      letter-spacing: 0.22em; text-transform: uppercase;
       cursor: pointer; transition: border-color 0.2s, color 0.2s;
       display: none;
     }
-    #playBtn:hover { border-color: rgba(255,255,255,0.6); color: #fff; }
+    #playBtn:hover { border-color: rgba(255,255,255,0.55); color: #fff; }
 
-    #legend {
-      position: fixed; top: 28px; right: 28px; z-index: 10;
-      font-size: 10px; line-height: 2.2; letter-spacing: 0.15em;
-      text-transform: uppercase; color: rgba(255,255,255,0.3);
-      pointer-events: none;
+    /* ── Top-left title ── */
+    #title {
+      position: fixed; top: 24px; left: 24px;
+      z-index: 10; pointer-events: none;
     }
-    #legend .head { color: rgba(255,255,255,0.15); margin-bottom: 2px; }
-    .swatch {
-      display: inline-block; width: 8px; height: 8px;
-      border-radius: 50%; margin-right: 8px; vertical-align: middle;
-    }
-
-    #title { position: fixed; top: 28px; left: 28px; z-index: 10; pointer-events: none; }
     #title h2 {
       font-size: 11px; letter-spacing: 0.3em;
       text-transform: uppercase; font-weight: 300;
       color: rgba(255,255,255,0.5);
     }
     #title p {
-      font-size: 10px; letter-spacing: 0.2em;
-      color: rgba(255,255,255,0.2); margin-top: 4px;
+      font-size: 9px; letter-spacing: 0.2em;
+      color: rgba(255,255,255,0.18); margin-top: 4px;
     }
 
-    #upload-panel {
-      display: none;
-      position: fixed; bottom: 80px; left: 28px; z-index: 10;
-      width: 220px;
+    /* ── Legend top-right ── */
+    #legend {
+      position: fixed; top: 24px; right: 24px; z-index: 10;
+      font-size: 9px; line-height: 2.4; letter-spacing: 0.14em;
+      text-transform: uppercase; color: rgba(255,255,255,0.25);
+      pointer-events: none;
     }
-    #dropzone {
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px;
-      padding: 14px 16px;
+    #legend .head { color: rgba(255,255,255,0.12); margin-bottom: 2px; }
+    .swatch {
+      display: inline-block; width: 7px; height: 7px;
+      border-radius: 50%; margin-right: 8px; vertical-align: middle;
+    }
+
+    /* ── Side panel ── */
+    #side-panel {
+      position: fixed; bottom: 72px; left: 24px;
+      z-index: 10; width: 220px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* ── Species selector ── */
+    .panel-section-label {
+      font-size: 8px; letter-spacing: 0.28em;
+      text-transform: uppercase; color: rgba(255,255,255,0.18);
+      margin-bottom: 6px;
+    }
+    #species-select-wrap { position: relative; }
+    #species-select-wrap::before {
+      content: '>_';
+      position: absolute; left: 10px; top: 50%;
+      transform: translateY(-50%);
+      font-size: 9px; letter-spacing: 0.1em;
+      color: rgba(255,255,255,0.25);
+      pointer-events: none; z-index: 1;
+    }
+    #speciesSelect {
+      width: 100%;
+      background: rgba(5,5,8,0.85);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: rgba(255,255,255,0.55);
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      padding: 9px 10px 9px 32px;
+      appearance: none;
       cursor: pointer;
-      background: rgba(5,5,8,0.7);
-      backdrop-filter: blur(8px);
+      outline: none;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    #speciesSelect:hover, #speciesSelect:focus {
+      border-color: rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.8);
+    }
+    #speciesSelect option {
+      background: #0c0c10;
+      color: rgba(255,255,255,0.7);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    /* custom arrow */
+    #species-select-wrap::after {
+      content: '';
+      position: absolute; right: 10px; top: 50%;
+      transform: translateY(-50%);
+      width: 0; height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 4px solid rgba(255,255,255,0.2);
+      pointer-events: none;
+    }
+
+    /* ── Upload panel ── */
+    #dropzone {
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 6px;
+      padding: 12px 14px;
+      cursor: pointer;
+      background: rgba(5,5,8,0.75);
+      backdrop-filter: blur(10px);
       transition: border-color 0.2s, background 0.2s;
     }
     #dropzone:hover, #dropzone.drag-over {
-      border-color: rgba(255,255,255,0.35);
-      background: rgba(12,12,18,0.85);
+      border-color: rgba(255,255,255,0.28);
+      background: rgba(12,12,18,0.88);
     }
-    #dropzone .dz-icon { font-size: 18px; text-align: center; margin-bottom: 6px; opacity: 0.4; }
+    #dropzone .dz-icon {
+      font-size: 16px; text-align: center;
+      margin-bottom: 5px; opacity: 0.3;
+    }
     #dropzone .dz-title {
-      font-size: 10px; letter-spacing: 0.18em;
-      text-transform: uppercase; color: rgba(255,255,255,0.5);
-      text-align: center; margin-bottom: 3px;
+      font-size: 9px; letter-spacing: 0.2em;
+      text-transform: uppercase; color: rgba(255,255,255,0.4);
+      text-align: center; margin-bottom: 2px;
     }
     #dropzone .dz-hint {
-      font-size: 9px; letter-spacing: 0.12em;
-      text-transform: uppercase; color: rgba(255,255,255,0.2);
+      font-size: 8px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: rgba(255,255,255,0.16);
       text-align: center;
     }
     #upload-progress-bg {
-      height: 2px; background: rgba(255,255,255,0.07);
-      border-radius: 2px; margin-top: 10px; overflow: hidden;
+      height: 1px; background: rgba(255,255,255,0.06);
+      margin-top: 8px; overflow: hidden;
     }
     #upload-progress-bar {
       height: 100%; width: 0%;
-      background: rgba(255,255,255,0.35);
-      border-radius: 2px;
+      background: rgba(255,255,255,0.3);
       transition: width 0.4s ease, opacity 0.4s ease;
       opacity: 0;
     }
     #upload-status {
-      font-size: 9px; letter-spacing: 0.12em;
-      text-transform: uppercase; color: rgba(255,255,255,0.3);
-      margin-top: 8px; min-height: 14px; line-height: 1.4;
+      font-size: 8px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: rgba(255,255,255,0.25);
+      margin-top: 7px; min-height: 13px; line-height: 1.4;
     }
     #mode-badge {
-      font-size: 9px; letter-spacing: 0.15em;
-      text-transform: uppercase; color: rgba(255,255,255,0.2);
-      margin-top: 10px; text-align: center;
+      font-size: 8px; letter-spacing: 0.15em;
+      text-transform: uppercase; color: rgba(255,255,255,0.16);
+      margin-top: 6px;
     }
 
+    /* ── Manifold legend dots (co-exist colours) ── */
+    #manifold-legend {
+      font-size: 8px; letter-spacing: 0.14em;
+      text-transform: uppercase; color: rgba(255,255,255,0.22);
+      line-height: 2;
+      display: none;
+    }
+    #manifold-legend.visible { display: block; }
+    .ml-dot {
+      display: inline-block; width: 6px; height: 6px;
+      border-radius: 50%; margin-right: 7px; vertical-align: middle;
+    }
+
+    /* ── Error state ── */
     #error-state {
       display: none; position: fixed; inset: 0; z-index: 30;
       flex-direction: column; align-items: center; justify-content: center;
-      background: #050508; gap: 16px;
+      background: #050508; gap: 14px;
     }
-    #error-state .error-icon { font-size: 32px; opacity: 0.5; }
+    #error-state .error-icon { font-size: 28px; opacity: 0.4; }
     #error-state .error-msg {
-      font-size: clamp(12px, 1.5vw, 14px); letter-spacing: 0.15em;
-      text-transform: uppercase; color: rgba(255,100,80,0.8);
-      max-width: 480px; text-align: center; line-height: 1.8;
+      font-size: clamp(11px, 1.4vw, 13px); letter-spacing: 0.15em;
+      text-transform: uppercase; color: rgba(255,100,80,0.75);
+      max-width: 460px; text-align: center; line-height: 1.9;
     }
     #error-state .error-hint {
-      font-size: 11px; letter-spacing: 0.1em;
-      color: rgba(255,255,255,0.2); text-transform: uppercase;
+      font-size: 10px; letter-spacing: 0.1em;
+      color: rgba(255,255,255,0.18); text-transform: uppercase;
     }
 
     @media (max-width: 600px) {
-      #upload-panel { left: 16px; right: 16px; width: auto; bottom: 72px; }
+      #side-panel { left: 14px; right: 14px; width: auto; bottom: 64px; }
       #legend { display: none; }
+      #title p { display: none; }
     }
   </style>
 </head>
@@ -176,6 +262,7 @@
     <div class="start-ring">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
     </div>
+    <p class="start-hint">Click to begin &middot; select a species or upload your own audio</p>
   </div>
 
   <div id="title">
@@ -201,17 +288,37 @@
     <div><span style="color:#4488ff">&#9473;</span> PC3 Spectral</div>
   </div>
 
-  <div id="upload-panel">
-    <div id="dropzone" role="button" aria-label="Upload your own audio file" tabindex="0">
-      <div class="dz-icon">&#127925;</div>
-      <div class="dz-title">Upload your audio</div>
-      <div class="dz-hint">mp3 &middot; wav &middot; ogg &middot; flac</div>
+  <!-- Side panel: species select + upload -->
+  <div id="side-panel">
+
+    <div>
+      <div class="panel-section-label">Select species</div>
+      <div id="species-select-wrap">
+        <select id="speciesSelect" aria-label="Select bird species">
+          <option value="">Loading...</option>
+        </select>
+      </div>
     </div>
-    <div id="upload-progress-bg">
-      <div id="upload-progress-bar"></div>
+
+    <div id="manifold-legend">
+      <div><span class="ml-dot" id="dot-primary"></span><span id="legend-primary">&#8212;</span></div>
+      <div><span class="ml-dot" id="dot-secondary" style="background:rgba(255,200,80,0.7)"></span><span id="legend-secondary">Uploaded</span></div>
     </div>
-    <div id="upload-status"></div>
-    <div id="mode-badge">Preloaded species</div>
+
+    <div>
+      <div class="panel-section-label">Upload your audio</div>
+      <div id="dropzone" role="button" aria-label="Upload your own audio file" tabindex="0">
+        <div class="dz-icon">&#127925;</div>
+        <div class="dz-title">Drop or click to upload</div>
+        <div class="dz-hint">mp3 &middot; wav &middot; ogg &middot; flac</div>
+      </div>
+      <div id="upload-progress-bg">
+        <div id="upload-progress-bar"></div>
+      </div>
+      <div id="upload-status"></div>
+      <div id="mode-badge">Preloaded species</div>
+    </div>
+
     <input type="file" id="audioFileInput" accept="audio/*" style="display:none" />
   </div>
 
