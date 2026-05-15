@@ -29,12 +29,11 @@ controls.autoRotateSpeed = 0.25;
 controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
-// ── Colour map: cool dim blue → red → orange → yellow → white (heat) ──────
+// ── Colour map: dark → red → orange → yellow → white (heat) ───────────────
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
   if (t < 0.25) {
-    // dim teal/blue → dark red
     c.setRGB(t * 1.2, t * 0.2, 0.15 + t * 0.1);
   } else if (t < 0.55) {
     const s = (t - 0.25) / 0.30;
@@ -63,7 +62,7 @@ function showError(msg) {
   if (ov) ov.style.display = 'none';
 }
 
-// ── Axes (very subtle) ─────────────────────────────────────────────────────
+// ── Axes ───────────────────────────────────────────────────────────────────
 function addAxis(a, b, hex, op = 0.08) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
   scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
@@ -85,38 +84,29 @@ addAxisLabel('PC2', new THREE.Vector3(0.04,1.64,0), '#33ff88');
 addAxisLabel('PC3', new THREE.Vector3(0.04,0,1.64), '#3388ff');
 
 // ── Slot ───────────────────────────────────────────────────────────────────
-const NODE_COUNT   = 80;   // graph nodes
-const KNN_EDGES    = 3;    // edges per node (spatial neighbours)
-const TRAIL_HOPS   = 10;   // how many traversal steps to show as glowing trail
+const NODE_COUNT = 80;
+const KNN_EDGES  = 3;
+const TRAIL_HOPS = 10;
 
 function makeSlot() {
   return {
     manifold: null,
     audio: null, audioReady: false,
-    // Graph structures
-    nodes: null,        // Float32Array(N*3) of node positions
-    nodeEnergy: null,   // Float32Array(N)
-    nodeRawIdx: null,   // Int32Array(N) — which raw frame this node maps to
-    edges: null,        // Array of [i,j] pairs
+    nodes: null, nodeEnergy: null, nodeRawIdx: null,
+    edges: null,
     edgeGeo: null, edgePos: null, edgeCol: null,
-    // Node sprites (InstancedMesh of small boxes)
     cloud: null,
-    // Labels (CSS2D) — sparse, only every Nth node
     labels: [],
-    // Traversal trail
-    trail: [],          // ring buffer of node indices (last TRAIL_HOPS)
+    trail: [],
     trailGeo: null, trailPos: null, trailCol: null,
-    // Active node halo (a single sphere around the active node)
     halo: null, haloMat: null,
-    objects: [],
-    labelObjects: [],
+    objects: [], labelObjects: [],
   };
 }
 
 const primary   = makeSlot();
 const secondary = makeSlot();
 
-// Node geometry: small box (looks like reference screenshot squares)
 const NODE_GEO = new THREE.BoxGeometry(0.013, 0.013, 0.013);
 const HALO_GEO = new THREE.SphereGeometry(0.032, 16, 16);
 
@@ -134,7 +124,6 @@ function disposeSlot(slot) {
   slot.trail = [];
 }
 
-// ── Build KNN graph from node positions ────────────────────────────────────
 function buildEdges(positions, N, k) {
   const edges = [];
   for (let i = 0; i < N; i++) {
@@ -148,7 +137,7 @@ function buildEdges(positions, N, k) {
     dists.sort((a, b) => a[1] - b[1]);
     for (let ki = 0; ki < Math.min(k, dists.length); ki++) {
       const j = dists[ki][0];
-      if (j > i) edges.push([i, j]); // avoid duplicates
+      if (j > i) edges.push([i, j]);
     }
   }
   return edges;
@@ -163,13 +152,12 @@ function buildSlot(slot, manifold) {
   const dur     = manifold.duration_s ?? times[times.length - 1] ?? 10;
   const spectral = manifold.spectral_centroid || [];
 
-  // Sample N evenly-spaced nodes from raw frames
-  const N        = NODE_COUNT;
-  const step     = (rawPts.length - 1) / (N - 1);
-  const nodePos  = new Float32Array(N * 3);
-  const nodeE    = new Float32Array(N);
-  const nodeRaw  = new Int32Array(N);
-  const nodeSC   = new Float32Array(N);
+  const N    = NODE_COUNT;
+  const step = (rawPts.length - 1) / (N - 1);
+  const nodePos = new Float32Array(N * 3);
+  const nodeE   = new Float32Array(N);
+  const nodeRaw = new Int32Array(N);
+  const nodeSC  = new Float32Array(N);
 
   for (let i = 0; i < N; i++) {
     const ri = Math.round(i * step);
@@ -186,12 +174,9 @@ function buildSlot(slot, manifold) {
   slot.nodeEnergy = nodeE;
   slot.nodeRawIdx = nodeRaw;
 
-  // Build spatial KNN edges
   const edges = buildEdges(nodePos, N, KNN_EDGES);
   slot.edges  = edges;
 
-  // ── Edge lines (all edges rendered dim, active edges brighten per-frame) ──
-  // We allocate max possible: N * KNN_EDGES * 2 points
   const maxEdgePts = edges.length * 2;
   slot.edgePos = new Float32Array(maxEdgePts * 3);
   slot.edgeCol = new Float32Array(maxEdgePts * 3);
@@ -200,7 +185,6 @@ function buildSlot(slot, manifold) {
   slot.edgeGeo.setAttribute('color',    new THREE.BufferAttribute(slot.edgeCol, 3));
   slot.edgeGeo.setDrawRange(0, maxEdgePts);
 
-  // Fill edge positions (static) and dim colours (updated per-frame)
   for (let e = 0; e < edges.length; e++) {
     const [i, j] = edges[e];
     slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
@@ -215,13 +199,11 @@ function buildSlot(slot, manifold) {
   slot.edgeGeo.attributes.position.needsUpdate = true;
   slot.edgeGeo.attributes.color.needsUpdate    = true;
 
-  const edgeMat  = new THREE.LineSegmentsMaterial ? undefined : undefined;
   const edgeLine = new THREE.LineSegments(slot.edgeGeo,
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 }));
   scene.add(edgeLine);
   slot.objects.push(edgeLine);
 
-  // ── Node cloud (InstancedMesh of boxes) ──
   const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const cloud    = new THREE.InstancedMesh(NODE_GEO, cloudMat, N);
   cloud.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -242,7 +224,6 @@ function buildSlot(slot, manifold) {
   slot.cloud = cloud;
   slot.objects.push(cloud);
 
-  // ── Sparse data labels (every 8th node) ──
   const LABEL_EVERY = 8;
   for (let i = 0; i < N; i += LABEL_EVERY) {
     const e  = nodeE[i];
@@ -259,17 +240,15 @@ function buildSlot(slot, manifold) {
     slot.labelObjects.push(css);
   }
 
-  // ── Halo (active node indicator) ──
   slot.haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, wireframe: true });
   slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
   scene.add(slot.halo);
   slot.objects.push(slot.halo);
 
-  // ── Traversal trail ──
-  const trailPts  = TRAIL_HOPS * 2; // segments between consecutive hops
-  slot.trailPos   = new Float32Array(trailPts * 3);
-  slot.trailCol   = new Float32Array(trailPts * 3);
-  slot.trailGeo   = new THREE.BufferGeometry();
+  const trailPts = TRAIL_HOPS * 2;
+  slot.trailPos  = new Float32Array(trailPts * 3);
+  slot.trailCol  = new Float32Array(trailPts * 3);
+  slot.trailGeo  = new THREE.BufferGeometry();
   slot.trailGeo.setAttribute('position', new THREE.BufferAttribute(slot.trailPos, 3));
   slot.trailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.trailCol, 3));
   slot.trailGeo.setDrawRange(0, 0);
@@ -281,8 +260,10 @@ function buildSlot(slot, manifold) {
   slot.manifold = { times, energy: rawE, rawPts, duration_s: dur, N };
 }
 
-// ── Timing ─────────────────────────────────────────────────────────────────
-let clockTime = 0, lastTS = null;
+// ── Clock — FIX: store absolute wall time of last pause to avoid jump on resume ──
+let clockTime = 0;
+let lastRAF   = null;   // last rAF timestamp while playing
+let playing   = false;  // true = animation clock is advancing
 
 function currentTime(slot) {
   if (slot.audioReady && slot.audio && !slot.audio.paused) return slot.audio.currentTime;
@@ -290,47 +271,44 @@ function currentTime(slot) {
 }
 
 function nodeForTime(slot, ct) {
-  const { times, duration_s, N } = slot.manifold;
+  const { times, duration_s } = slot.manifold;
   const dur = duration_s ?? times[times.length - 1] ?? 10;
   const tt  = dur > 0 ? ct % dur : ct;
   let lo = 0, hi = times.length - 1;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < tt) lo = mid + 1; else hi = mid; }
-  const rawIdx = clamp(lo, 0, times.length - 1);
-  // Find nearest node to this raw frame
+  const rawIdx   = clamp(lo, 0, times.length - 1);
   const nodeStep = (times.length - 1) / (NODE_COUNT - 1);
   return clamp(Math.round(rawIdx / nodeStep), 0, NODE_COUNT - 1);
 }
 
 // ── Per-frame update ───────────────────────────────────────────────────────
-const _d  = new THREE.Object3D();
-const _c  = new THREE.Color();
+const _d = new THREE.Object3D();
+const _c = new THREE.Color();
 
 function tickSlot(slot) {
   if (!slot.manifold || !slot.cloud) return;
   const { nodes, nodeEnergy, edges } = slot;
   const N   = NODE_COUNT;
   const ct  = currentTime(slot);
-  const ani = nodeForTime(slot, ct); // active node index
+  const ani = nodeForTime(slot, ct);
   const ae  = nodeEnergy[ani];
 
-  // Find direct neighbours of active node
   const neighbours = new Set();
   for (const [i, j] of edges) {
     if (i === ani) neighbours.add(j);
     if (j === ani) neighbours.add(i);
   }
 
-  // ── Update node cloud ──
   for (let i = 0; i < N; i++) {
     const e  = nodeEnergy[i];
-    const isActive = i === ani;
+    const isActive    = i === ani;
     const isNeighbour = neighbours.has(i);
-    const bright = isActive ? 4.5 + ae * 3.0
-                 : isNeighbour ? 1.2 + e * 1.8
-                 : 0.15 + e * 0.08;
-    const scale  = isActive ? 2.8 + ae * 2.0
-                 : isNeighbour ? 1.4 + e * 0.6
-                 : 0.7 + e * 0.4;
+    const bright = isActive    ? 4.5 + ae * 3.0
+                 : isNeighbour ? 1.2 + e  * 1.8
+                 :               0.15 + e * 0.08;
+    const scale  = isActive    ? 2.8 + ae * 2.0
+                 : isNeighbour ? 1.4 + e  * 0.6
+                 :               0.7 + e  * 0.4;
     _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
     _d.scale.set(scale, scale, scale);
     _d.updateMatrix();
@@ -341,14 +319,13 @@ function tickSlot(slot) {
   slot.cloud.instanceMatrix.needsUpdate = true;
   slot.cloud.instanceColor.needsUpdate  = true;
 
-  // ── Update edge colours — active edges blaze ──
   const { edgeCol, edgeGeo } = slot;
   for (let ei = 0; ei < edges.length; ei++) {
-    const [i, j] = edges[ei];
-    const isActiveEdge = i === ani || j === ani;
-    const bright = isActiveEdge ? 1.8 + ae * 2.0 : 0.07;
-    const e      = Math.max(nodeEnergy[i], nodeEnergy[j]);
-    const c2     = heatColor(e);
+    const [i, j]    = edges[ei];
+    const isActive  = i === ani || j === ani;
+    const bright    = isActive ? 1.8 + ae * 2.0 : 0.07;
+    const e         = Math.max(nodeEnergy[i], nodeEnergy[j]);
+    const c2        = heatColor(e);
     c2.multiplyScalar(bright);
     for (let k = 0; k < 2; k++) {
       edgeCol[(ei*2+k)*3]   = c2.r;
@@ -358,23 +335,19 @@ function tickSlot(slot) {
   }
   edgeGeo.attributes.color.needsUpdate = true;
 
-  // ── Halo ──
   slot.halo.position.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
   const hs = 1.0 + ae * 1.4;
   slot.halo.scale.set(hs, hs, hs);
   slot.haloMat.opacity = 0.35 + ae * 0.45;
   slot.haloMat.color   = heatColor(ae);
 
-  // ── Label visibility: highlight label nearest active node ──
-  for (const { css, el, nodeIdx } of slot.labels) {
-    const dist = Math.abs(nodeIdx - ani) / N;
+  for (const { el, nodeIdx } of slot.labels) {
+    const dist   = Math.abs(nodeIdx - ani) / N;
     const active = dist < 0.06;
     el.style.opacity = active ? '0.85' : '0.18';
     el.style.color   = active ? '#' + heatColor(nodeEnergy[nodeIdx]).getHexString() : '#334455';
   }
 
-  // ── Traversal trail ──
-  // Push ani into trail ring
   if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
   if (slot.trail.length > TRAIL_HOPS + 1) slot.trail.shift();
 
@@ -382,14 +355,12 @@ function tickSlot(slot) {
   const segs = Math.max(0, tLen - 1);
   const { trailPos, trailCol, trailGeo } = slot;
   for (let s = 0; s < segs; s++) {
-    const a  = slot.trail[s],   b = slot.trail[s + 1];
-    const ea = nodeEnergy[a],  eb = nodeEnergy[b];
-    const f  = (s + 1) / segs;           // 0=oldest, 1=newest
+    const a  = slot.trail[s], b = slot.trail[s + 1];
+    const ea = nodeEnergy[a], eb = nodeEnergy[b];
+    const f  = (s + 1) / segs;
     const bright = Math.pow(f, 1.5) * 3.2;
-
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
-
     _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.5));
     trailCol[s*6+0] = _c.r; trailCol[s*6+1] = _c.g; trailCol[s*6+2] = _c.b;
     _c.copy(heatColor(eb)).multiplyScalar(bright);
@@ -405,8 +376,8 @@ function loadAudioForSlot(slot, key) {
   if (slot.audio) { slot.audio.pause(); slot.audio.src = ''; }
   slot.audioReady = false;
   const audio = new Audio();
-  audio.loop   = true;
-  slot.audio   = audio;
+  audio.loop = true;
+  slot.audio = audio;
   let idx = 0;
   const cands = [`./birds/${key}.ogg`, `./birds/${key}.mp3`];
   function tryNext() {
@@ -415,7 +386,8 @@ function loadAudioForSlot(slot, key) {
   }
   audio.addEventListener('canplaythrough', () => {
     slot.audioReady = true;
-    if (started && !paused) audio.play().catch(() => {});
+    // FIX: only auto-play if user has already started (overlay dismissed)
+    if (playing) audio.play().catch(() => {});
   }, { once: true });
   audio.addEventListener('error', tryNext);
   tryNext();
@@ -429,8 +401,8 @@ try {
   allData = await res.json();
 } catch (err) { showError(`Failed to load data: ${err.message}`); throw err; }
 
-const isSingle   = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
-const speciesMap = isSingle ? { [(allData.species || 'birdsong')]: allData } : allData;
+const isSingle    = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
+const speciesMap  = isSingle ? { [(allData.species || 'birdsong')]: allData } : allData;
 const speciesKeys = Object.keys(speciesMap);
 if (!speciesKeys.length) { showError('birdsong_data.json is empty.'); throw new Error('Empty'); }
 
@@ -489,33 +461,52 @@ function loadSpecies(key) {
 
 loadSpecies(speciesKeys[0]);
 select.value = speciesKeys[0];
-select.addEventListener('change', () => { if (primary.audio) primary.audio.pause(); loadSpecies(select.value); });
+select.addEventListener('change', () => {
+  if (primary.audio) primary.audio.pause();
+  loadSpecies(select.value);
+  // FIX: if already playing, immediately play the new audio once it's ready
+  // (handled inside loadAudioForSlot via the `playing` flag)
+});
 
-// ── Overlay / Pause ────────────────────────────────────────────────────────
-let started = false, paused = false;
+// ── Overlay / Pause — FIX all three bugs ──────────────────────────────────
 const overlay   = document.getElementById('overlay');
 const playBtn   = document.getElementById('playBtn');
 const modeBadge = document.getElementById('mode-badge');
 
-overlay.addEventListener('click', () => {
-  overlay.classList.add('hidden');
-  setTimeout(() => overlay.style.display = 'none', 900);
-  playBtn.style.display = 'block';
-  started = true; paused = false;
+// FIX 1: show playBtn immediately (not after overlay click) so it's always accessible
+playBtn.style.display = 'block';
+playBtn.textContent = 'Play';
+
+function startPlayback() {
+  playing = true;
   playBtn.textContent = 'Pause';
+  // FIX 2: reset lastRAF so the clock doesn't jump on first/resumed frame
+  lastRAF = null;
   primary.audio?.play().catch(() => {});
   if (secondary.audio) secondary.audio.play().catch(() => {});
+}
+
+function pausePlayback() {
+  playing = false;
+  playBtn.textContent = 'Play';
+  // FIX 3: nullify lastRAF so next resume doesn't accumulate the paused gap
+  lastRAF = null;
+  primary.audio?.pause();
+  secondary.audio?.pause();
+}
+
+overlay.addEventListener('click', () => {
+  overlay.classList.add('hidden');
+  setTimeout(() => { overlay.style.display = 'none'; }, 900);
+  startPlayback();
 }, { once: true });
 
 playBtn.addEventListener('click', e => {
   e.stopPropagation();
-  if (!paused) {
-    primary.audio?.pause(); secondary.audio?.pause();
-    paused = true; playBtn.textContent = 'Resume';
+  if (playing) {
+    pausePlayback();
   } else {
-    primary.audio?.play().catch(() => {});
-    if (secondary.audio) secondary.audio.play().catch(() => {});
-    paused = false; playBtn.textContent = 'Pause';
+    startPlayback();
   }
 });
 
@@ -529,7 +520,7 @@ initUpload({
     audio.loop = true; secondary.audio = audio;
     audio.addEventListener('canplaythrough', () => {
       secondary.audioReady = true;
-      if (started && !paused) audio.play().catch(() => {});
+      if (playing) audio.play().catch(() => {});
     }, { once: true });
     if (modeBadge) modeBadge.textContent = m.species.replace(/_/g,' ').toUpperCase();
     document.getElementById('legend-secondary').textContent = m.species.replace(/_/g,' ');
@@ -540,18 +531,23 @@ initUpload({
   onProgress() {},
 });
 
-// ── Animation ─────────────────────────────────────────────────────────────
+// ── Animation loop ─────────────────────────────────────────────────────────
 function animate(ts) {
   requestAnimationFrame(animate);
   controls.update();
-  if (started && !paused) {
-    if (lastTS !== null) clockTime += (ts - lastTS) / 1000;
-    lastTS = ts;
+
+  if (playing) {
+    // FIX: only accumulate delta if lastRAF is set (prevents giant jump after pause/resume)
+    if (lastRAF !== null) {
+      const delta = (ts - lastRAF) / 1000;
+      // Guard against tab-hidden spikes (cap at 0.5s per frame)
+      clockTime += Math.min(delta, 0.5);
+    }
+    lastRAF = ts;
     tickSlot(primary);
     if (secondary.manifold) tickSlot(secondary);
-  } else {
-    lastTS = null;
   }
+  // Always render so orbit controls keep working even while paused
   renderer.render(scene, camera);
   css2d.render(scene, camera);
 }
