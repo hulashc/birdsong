@@ -29,28 +29,27 @@ controls.autoRotateSpeed = 0.25;
 controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
-// ── Vivid neon heat palette: cyan → green → yellow → orange → white ────────
+// ── Colour map: dark → red → orange → yellow → white (heat) ───────────────
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
   if (t < 0.25) {
-    // deep cyan → electric green
-    const s = t / 0.25;
-    c.setRGB(0.0,  0.6 + s * 0.4,  1.0 - s * 0.2);
-  } else if (t < 0.50) {
-    // electric green → bright yellow
-    const s = (t - 0.25) / 0.25;
-    c.setRGB(s * 1.0,  1.0,  0.8 - s * 0.8);
-  } else if (t < 0.75) {
-    // bright yellow → vivid orange
-    const s = (t - 0.50) / 0.25;
-    c.setRGB(1.0,  1.0 - s * 0.5,  0.0);
+    c.setRGB(t * 1.2, t * 0.2, 0.15 + t * 0.1);
+  } else if (t < 0.55) {
+    const s = (t - 0.25) / 0.30;
+    c.setRGB(0.3 + s * 0.7, s * 0.25, 0.05);
+  } else if (t < 0.80) {
+    const s = (t - 0.55) / 0.25;
+    c.setRGB(1.0, 0.25 + s * 0.55, s * 0.1);
   } else {
-    // vivid orange → white-hot
-    const s = (t - 0.75) / 0.25;
-    c.setRGB(1.0,  0.5 + s * 0.5,  s * 1.0);
+    const s = (t - 0.80) / 0.20;
+    c.setRGB(1.0, 0.8 + s * 0.2, 0.1 + s * 0.9);
   }
   return c;
+}
+
+function dimColor(e, factor = 0.12) {
+  return heatColor(e).multiplyScalar(factor);
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -63,31 +62,31 @@ function showError(msg) {
   if (ov) ov.style.display = 'none';
 }
 
-// ── Axes — vivid, clearly visible ─────────────────────────────────────────
-function addAxis(a, b, hex, op = 0.6) {
+// ── Axes ───────────────────────────────────────────────────────────────────
+function addAxis(a, b, hex, op = 0.08) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
   scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
 }
-addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xff3366, 0.65);
-addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x00ffaa, 0.65);
-addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x33aaff, 0.65);
+addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0x331111, 0.12);
+addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x113311, 0.12);
+addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x111133, 0.12);
 
 function addAxisLabel(text, pos, col) {
   const el = document.createElement('div');
   el.textContent = text;
-  el.style.cssText = `color:${col};font-size:8px;letter-spacing:.35em;font-weight:700;text-transform:uppercase;font-family:'Courier New',monospace;opacity:0.90;padding:1px 4px;text-shadow:0 0 6px ${col};`;
+  el.style.cssText = `color:${col};font-size:7px;letter-spacing:.3em;font-weight:700;text-transform:uppercase;font-family:'Courier New',monospace;opacity:0.25;padding:1px 4px;`;
   const obj = new CSS2DObject(el);
   obj.position.copy(pos);
   scene.add(obj);
 }
-addAxisLabel('PC1', new THREE.Vector3(1.68,0.05,0), '#ff6688');
-addAxisLabel('PC2', new THREE.Vector3(0.05,1.68,0), '#00ffcc');
-addAxisLabel('PC3', new THREE.Vector3(0.05,0,1.68), '#55bbff');
+addAxisLabel('PC1', new THREE.Vector3(1.64,0.04,0), '#ff3333');
+addAxisLabel('PC2', new THREE.Vector3(0.04,1.64,0), '#33ff88');
+addAxisLabel('PC3', new THREE.Vector3(0.04,0,1.64), '#3388ff');
 
 // ── Slot ───────────────────────────────────────────────────────────────────
 const NODE_COUNT = 80;
 const KNN_EDGES  = 3;
-const TRAIL_HOPS = 14;
+const TRAIL_HOPS = 10;
 
 function makeSlot() {
   return {
@@ -102,9 +101,7 @@ function makeSlot() {
     trailGeo: null, trailPos: null, trailCol: null,
     halo: null, haloMat: null,
     objects: [], labelObjects: [],
-    // smooth fractional index + smooth world-space halo position
-    smoothIdx: 0,
-    smoothPos: new THREE.Vector3(),
+    smoothIdx: 0,  // fractional EMA index for jitter-free motion
   };
 }
 
@@ -127,7 +124,6 @@ function disposeSlot(slot) {
   slot.manifold = null; slot.cloud = null; slot.halo = null;
   slot.trail = [];
   slot.smoothIdx = 0;
-  slot.smoothPos.set(0, 0, 0);
 }
 
 function buildEdges(positions, N, k) {
@@ -195,11 +191,11 @@ function buildSlot(slot, manifold) {
     const [i, j] = edges[e];
     slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
     slot.edgePos[e*6+3] = nodePos[j*3];   slot.edgePos[e*6+4] = nodePos[j*3+1]; slot.edgePos[e*6+5] = nodePos[j*3+2];
-    const base = heatColor(Math.max(nodeE[i], nodeE[j])).multiplyScalar(0.55);
+    const dc = dimColor(Math.max(nodeE[i], nodeE[j]), 0.08);
     for (let k = 0; k < 2; k++) {
-      slot.edgeCol[(e*2+k)*3]   = base.r;
-      slot.edgeCol[(e*2+k)*3+1] = base.g;
-      slot.edgeCol[(e*2+k)*3+2] = base.b;
+      slot.edgeCol[(e*2+k)*3]   = dc.r;
+      slot.edgeCol[(e*2+k)*3+1] = dc.g;
+      slot.edgeCol[(e*2+k)*3+2] = dc.b;
     }
   }
   slot.edgeGeo.attributes.position.needsUpdate = true;
@@ -221,7 +217,7 @@ function buildSlot(slot, manifold) {
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     cloud.setMatrixAt(i, dummy.matrix);
-    nc.copy(heatColor(nodeE[i])).multiplyScalar(0.65);
+    nc.copy(dimColor(nodeE[i], 0.20));
     cloud.setColorAt(i, nc);
   }
   cloud.instanceMatrix.needsUpdate = true;
@@ -246,7 +242,7 @@ function buildSlot(slot, manifold) {
     slot.labelObjects.push(css);
   }
 
-  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, wireframe: true });
+  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, wireframe: true });
   slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
   scene.add(slot.halo);
   slot.objects.push(slot.halo);
@@ -259,13 +255,12 @@ function buildSlot(slot, manifold) {
   slot.trailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.trailCol, 3));
   slot.trailGeo.setDrawRange(0, 0);
   const trailLine = new THREE.LineSegments(slot.trailGeo,
-    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1.0 }));
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 }));
   scene.add(trailLine);
   slot.objects.push(trailLine);
 
   slot.manifold = { times, energy: rawE, rawPts, duration_s: dur, N };
   slot.smoothIdx = 0;
-  slot.smoothPos.set(nodePos[0], nodePos[1], nodePos[2]);
 }
 
 // ── Clock ──────────────────────────────────────────────────────────────────
@@ -278,11 +273,11 @@ function currentTime(slot) {
   return clockTime;
 }
 
-// Returns raw fractional node index — no rounding
+// Returns fractional node index (no rounding) for smooth EMA tracking
 function fracNodeForTime(slot, ct) {
   const { times, duration_s } = slot.manifold;
-  const dur  = duration_s ?? times[times.length - 1] ?? 10;
-  const tt   = dur > 0 ? ct % dur : ct;
+  const dur = duration_s ?? times[times.length - 1] ?? 10;
+  const tt  = dur > 0 ? ct % dur : ct;
   let lo = 0, hi = times.length - 1;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < tt) lo = mid + 1; else hi = mid; }
   const rawIdx   = clamp(lo, 0, times.length - 1);
@@ -291,14 +286,8 @@ function fracNodeForTime(slot, ct) {
 }
 
 // ── Per-frame update ───────────────────────────────────────────────────────
-const _d  = new THREE.Object3D();
-const _c  = new THREE.Color();
-const _tp = new THREE.Vector3();
-
-// Ultra-low alpha = ultra-smooth. 0.035 gives a gentle, cinematic glide.
-const SMOOTH_ALPHA = 0.035;
-// Position lerp alpha — smooths halo/trail in world space, not index space
-const POS_ALPHA    = 0.055;
+const _d = new THREE.Object3D();
+const _c = new THREE.Color();
 
 function tickSlot(slot) {
   if (!slot.manifold || !slot.cloud) return;
@@ -306,15 +295,11 @@ function tickSlot(slot) {
   const N   = NODE_COUNT;
   const ct  = currentTime(slot);
 
-  // Smooth the fractional index
-  const targetFrac = fracNodeForTime(slot, ct);
-  slot.smoothIdx   = slot.smoothIdx + SMOOTH_ALPHA * (targetFrac - slot.smoothIdx);
-  const ani        = clamp(Math.round(slot.smoothIdx), 0, N - 1);
-  const ae         = nodeEnergy[ani];
-
-  // Smooth the world-space position for halo (eliminates snap between nodes)
-  _tp.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
-  slot.smoothPos.lerp(_tp, POS_ALPHA);
+  // EMA smooth: glide toward target index, then snap to nearest integer
+  const target   = fracNodeForTime(slot, ct);
+  slot.smoothIdx = slot.smoothIdx + 0.06 * (target - slot.smoothIdx);
+  const ani      = clamp(Math.round(slot.smoothIdx), 0, N - 1);
+  const ae       = nodeEnergy[ani];
 
   const neighbours = new Set();
   for (const [i, j] of edges) {
@@ -326,12 +311,12 @@ function tickSlot(slot) {
     const e  = nodeEnergy[i];
     const isActive    = i === ani;
     const isNeighbour = neighbours.has(i);
-    const bright = isActive    ? 5.0 + ae * 3.5
-                 : isNeighbour ? 1.8 + e  * 2.0
-                 :               0.55 + e * 0.35;
-    const scale  = isActive    ? 3.0 + ae * 2.0
-                 : isNeighbour ? 1.6 + e  * 0.6
-                 :               0.8 + e  * 0.4;
+    const bright = isActive    ? 4.5 + ae * 3.0
+                 : isNeighbour ? 1.2 + e  * 1.8
+                 :               0.15 + e * 0.08;
+    const scale  = isActive    ? 2.8 + ae * 2.0
+                 : isNeighbour ? 1.4 + e  * 0.6
+                 :               0.7 + e  * 0.4;
     _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
     _d.scale.set(scale, scale, scale);
     _d.updateMatrix();
@@ -346,29 +331,29 @@ function tickSlot(slot) {
   for (let ei = 0; ei < edges.length; ei++) {
     const [i, j]    = edges[ei];
     const isActive  = i === ani || j === ani;
-    const bright    = isActive ? 2.2 + ae * 2.5 : 0.50;
+    const bright    = isActive ? 1.8 + ae * 2.0 : 0.07;
     const e         = Math.max(nodeEnergy[i], nodeEnergy[j]);
-    _c.copy(heatColor(e)).multiplyScalar(bright);
+    const c2        = heatColor(e);
+    c2.multiplyScalar(bright);
     for (let k = 0; k < 2; k++) {
-      edgeCol[(ei*2+k)*3]   = _c.r;
-      edgeCol[(ei*2+k)*3+1] = _c.g;
-      edgeCol[(ei*2+k)*3+2] = _c.b;
+      edgeCol[(ei*2+k)*3]   = c2.r;
+      edgeCol[(ei*2+k)*3+1] = c2.g;
+      edgeCol[(ei*2+k)*3+2] = c2.b;
     }
   }
   edgeGeo.attributes.color.needsUpdate = true;
 
-  // Halo uses smoothed world position — no pop
-  slot.halo.position.copy(slot.smoothPos);
-  const hs = 1.1 + ae * 1.6;
+  slot.halo.position.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
+  const hs = 1.0 + ae * 1.4;
   slot.halo.scale.set(hs, hs, hs);
-  slot.haloMat.opacity = 0.45 + ae * 0.50;
+  slot.haloMat.opacity = 0.35 + ae * 0.45;
   slot.haloMat.color   = heatColor(ae);
 
   for (const { el, nodeIdx } of slot.labels) {
     const dist   = Math.abs(nodeIdx - ani) / N;
     const active = dist < 0.06;
-    el.style.opacity = active ? '0.95' : '0.22';
-    el.style.color   = active ? '#' + heatColor(nodeEnergy[nodeIdx]).getHexString() : '#556677';
+    el.style.opacity = active ? '0.85' : '0.18';
+    el.style.color   = active ? '#' + heatColor(nodeEnergy[nodeIdx]).getHexString() : '#334455';
   }
 
   if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
@@ -381,10 +366,10 @@ function tickSlot(slot) {
     const a  = slot.trail[s], b = slot.trail[s + 1];
     const ea = nodeEnergy[a], eb = nodeEnergy[b];
     const f  = (s + 1) / segs;
-    const bright = Math.pow(f, 0.9) * 4.5;
+    const bright = Math.pow(f, 1.5) * 3.2;
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
-    _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.3));
+    _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.5));
     trailCol[s*6+0] = _c.r; trailCol[s*6+1] = _c.g; trailCol[s*6+2] = _c.b;
     _c.copy(heatColor(eb)).multiplyScalar(bright);
     trailCol[s*6+3] = _c.r; trailCol[s*6+4] = _c.g; trailCol[s*6+5] = _c.b;
@@ -551,14 +536,13 @@ function animate(ts) {
 
   if (playing) {
     if (lastRAF !== null) {
-      const dt = Math.min((ts - lastRAF) / 1000, 0.5);
-      clockTime += dt;
+      const delta = (ts - lastRAF) / 1000;
+      clockTime += Math.min(delta, 0.5);
     }
     lastRAF = ts;
     tickSlot(primary);
     if (secondary.manifold) tickSlot(secondary);
   }
-
   renderer.render(scene, camera);
   css2d.render(scene, camera);
 }
