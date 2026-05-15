@@ -6,13 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Spatiotemporal Acoustic Manifold</title>
   <style>
-    *,
-    *::before,
-    *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background: #050508;
@@ -21,240 +15,204 @@
       overflow: hidden;
     }
 
-    canvas {
-      display: block;
-    }
+    canvas { display: block; }
 
-    /* Overlay */
     #overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: #050508;
-      cursor: pointer;
+      position: fixed; inset: 0; z-index: 20;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: #050508; cursor: pointer;
       transition: opacity 0.8s ease;
     }
-
-    #overlay.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
-
+    #overlay.hidden { opacity: 0; pointer-events: none; }
     #overlay h1 {
       font-size: clamp(14px, 2vw, 20px);
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      color: #fff;
-      font-weight: 300;
-      margin-bottom: 6px;
+      letter-spacing: 0.3em; text-transform: uppercase;
+      color: #fff; font-weight: 300; margin-bottom: 6px;
     }
-
     #overlay p {
       font-size: clamp(10px, 1.2vw, 13px);
-      letter-spacing: 0.2em;
-      color: #555;
-      text-transform: uppercase;
-      margin-bottom: 48px;
+      letter-spacing: 0.2em; color: #555;
+      text-transform: uppercase; margin-bottom: 48px;
     }
-
     #overlay .start-ring {
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 80px; height: 80px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.25);
+      display: flex; align-items: center; justify-content: center;
       transition: border-color 0.3s;
     }
+    #overlay:hover .start-ring { border-color: rgba(255,255,255,0.7); }
+    #overlay .start-ring svg { width: 22px; height: 22px; fill: #fff; opacity: 0.8; }
 
-    #overlay:hover .start-ring {
-      border-color: rgba(255, 255, 255, 0.7);
-    }
-
-    #overlay .start-ring svg {
-      width: 22px;
-      height: 22px;
-      fill: #fff;
-      opacity: 0.8;
-    }
-
-    /* Bottom UI */
     #ui {
-      position: fixed;
-      bottom: 32px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      display: flex;
-      align-items: center;
-      gap: 20px;
+      position: fixed; bottom: 32px; left: 50%;
+      transform: translateX(-50%); z-index: 10;
+      display: flex; align-items: center; gap: 20px;
       pointer-events: none;
     }
-
     #label {
-      font-size: 10px;
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.4);
+      font-size: 10px; letter-spacing: 0.25em;
+      text-transform: uppercase; color: rgba(255,255,255,0.4);
     }
-
     #playBtn {
-      pointer-events: all;
-      background: none;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: rgba(255, 255, 255, 0.6);
-      border-radius: 20px;
-      padding: 6px 20px;
-      font-size: 10px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: border-color 0.2s, color 0.2s;
+      pointer-events: all; background: none;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: rgba(255,255,255,0.6); border-radius: 20px;
+      padding: 6px 20px; font-size: 10px;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      cursor: pointer; transition: border-color 0.2s, color 0.2s;
       display: none;
     }
+    #playBtn:hover { border-color: rgba(255,255,255,0.6); color: #fff; }
 
-    #playBtn:hover {
-      border-color: rgba(255, 255, 255, 0.6);
-      color: #fff;
-    }
-
-    /* Legend */
     #legend {
-      position: fixed;
-      top: 28px;
-      right: 28px;
-      z-index: 10;
-      font-size: 10px;
-      line-height: 2.2;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.3);
+      position: fixed; top: 28px; right: 28px; z-index: 10;
+      font-size: 10px; line-height: 2.2; letter-spacing: 0.15em;
+      text-transform: uppercase; color: rgba(255,255,255,0.3);
       pointer-events: none;
     }
-
-    #legend .head {
-      color: rgba(255, 255, 255, 0.15);
-      margin-bottom: 2px;
-    }
-
+    #legend .head { color: rgba(255,255,255,0.15); margin-bottom: 2px; }
     .swatch {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 8px;
-      vertical-align: middle;
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; margin-right: 8px; vertical-align: middle;
     }
 
-    /* Top left title */
-    #title {
-      position: fixed;
-      top: 28px;
-      left: 28px;
-      z-index: 10;
-      pointer-events: none;
-    }
-
+    #title { position: fixed; top: 28px; left: 28px; z-index: 10; pointer-events: none; }
     #title h2 {
-      font-size: 11px;
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      font-weight: 300;
-      color: rgba(255, 255, 255, 0.5);
+      font-size: 11px; letter-spacing: 0.3em;
+      text-transform: uppercase; font-weight: 300;
+      color: rgba(255,255,255,0.5);
     }
-
     #title p {
-      font-size: 10px;
-      letter-spacing: 0.2em;
-      color: rgba(255, 255, 255, 0.2);
-      margin-top: 4px;
+      font-size: 10px; letter-spacing: 0.2em;
+      color: rgba(255,255,255,0.2); margin-top: 4px;
     }
 
-    /* Error state */
-    #error-state {
+    #upload-panel {
       display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 30;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: #050508;
-      gap: 16px;
+      position: fixed; bottom: 80px; left: 28px; z-index: 10;
+      width: 220px;
     }
-
-    #error-state .error-icon {
-      font-size: 32px;
-      opacity: 0.5;
+    #dropzone {
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 14px 16px;
+      cursor: pointer;
+      background: rgba(5,5,8,0.7);
+      backdrop-filter: blur(8px);
+      transition: border-color 0.2s, background 0.2s;
     }
-
-    #error-state .error-msg {
-      font-size: clamp(12px, 1.5vw, 14px);
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: rgba(255, 100, 80, 0.8);
-      max-width: 480px;
+    #dropzone:hover, #dropzone.drag-over {
+      border-color: rgba(255,255,255,0.35);
+      background: rgba(12,12,18,0.85);
+    }
+    #dropzone .dz-icon { font-size: 18px; text-align: center; margin-bottom: 6px; opacity: 0.4; }
+    #dropzone .dz-title {
+      font-size: 10px; letter-spacing: 0.18em;
+      text-transform: uppercase; color: rgba(255,255,255,0.5);
+      text-align: center; margin-bottom: 3px;
+    }
+    #dropzone .dz-hint {
+      font-size: 9px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: rgba(255,255,255,0.2);
       text-align: center;
-      line-height: 1.8;
+    }
+    #upload-progress-bg {
+      height: 2px; background: rgba(255,255,255,0.07);
+      border-radius: 2px; margin-top: 10px; overflow: hidden;
+    }
+    #upload-progress-bar {
+      height: 100%; width: 0%;
+      background: rgba(255,255,255,0.35);
+      border-radius: 2px;
+      transition: width 0.4s ease, opacity 0.4s ease;
+      opacity: 0;
+    }
+    #upload-status {
+      font-size: 9px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: rgba(255,255,255,0.3);
+      margin-top: 8px; min-height: 14px; line-height: 1.4;
+    }
+    #mode-badge {
+      font-size: 9px; letter-spacing: 0.15em;
+      text-transform: uppercase; color: rgba(255,255,255,0.2);
+      margin-top: 10px; text-align: center;
     }
 
+    #error-state {
+      display: none; position: fixed; inset: 0; z-index: 30;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: #050508; gap: 16px;
+    }
+    #error-state .error-icon { font-size: 32px; opacity: 0.5; }
+    #error-state .error-msg {
+      font-size: clamp(12px, 1.5vw, 14px); letter-spacing: 0.15em;
+      text-transform: uppercase; color: rgba(255,100,80,0.8);
+      max-width: 480px; text-align: center; line-height: 1.8;
+    }
     #error-state .error-hint {
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      color: rgba(255, 255, 255, 0.2);
-      text-transform: uppercase;
+      font-size: 11px; letter-spacing: 0.1em;
+      color: rgba(255,255,255,0.2); text-transform: uppercase;
+    }
+
+    @media (max-width: 600px) {
+      #upload-panel { left: 16px; right: 16px; width: auto; bottom: 72px; }
+      #legend { display: none; }
     }
   </style>
 </head>
 
 <body>
-  <!-- Error state -->
+
   <div id="error-state" role="alert">
-    <div class="error-icon">⚠</div>
+    <div class="error-icon">&#9888;</div>
     <div class="error-msg"></div>
     <div class="error-hint">Check the console for details</div>
   </div>
 
-  <!-- Overlay -->
   <div id="overlay">
     <h1>Spatiotemporal Acoustic Manifold</h1>
     <p>A mathematical model of birdsong</p>
     <div class="start-ring">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <polygon points="5,3 19,12 5,21" />
-      </svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
     </div>
   </div>
 
-  <!-- Top-left title -->
   <div id="title">
-    <h2 id="titleSpecies">—</h2>
-    <p>MFCC · PCA · 3D Trajectory</p>
+    <h2 id="titleSpecies">&#8212;</h2>
+    <p>MFCC &middot; PCA &middot; 3D Trajectory</p>
   </div>
 
-  <!-- Bottom UI -->
   <div id="ui">
     <div id="label">Spatiotemporal Acoustic Manifold</div>
     <button id="playBtn">Pause</button>
   </div>
 
-  <!-- Legend -->
   <div id="legend" aria-label="Colour and size legend">
-    <div class="head">Colour · Energy</div>
+    <div class="head">Colour &middot; Energy</div>
     <div><span class="swatch" style="background:#3a6fff"></span>Silence</div>
     <div><span class="swatch" style="background:#00e5aa"></span>Mid</div>
     <div><span class="swatch" style="background:#ff6a00"></span>Peak call</div>
-    <div style="margin-top:10px" class="head">Size · Amplitude</div>
+    <div style="margin-top:10px" class="head">Size &middot; Amplitude</div>
     <div>Larger = louder</div>
     <div style="margin-top:10px" class="head">Axes</div>
-    <div><span style="color:#ff4444">━</span> PC1 Timbre</div>
-    <div><span style="color:#44ff88">━</span> PC2 Texture</div>
-    <div><span style="color:#4488ff">━</span> PC3 Spectral</div>
+    <div><span style="color:#ff4444">&#9473;</span> PC1 Timbre</div>
+    <div><span style="color:#44ff88">&#9473;</span> PC2 Texture</div>
+    <div><span style="color:#4488ff">&#9473;</span> PC3 Spectral</div>
+  </div>
+
+  <div id="upload-panel">
+    <div id="dropzone" role="button" aria-label="Upload your own audio file" tabindex="0">
+      <div class="dz-icon">&#127925;</div>
+      <div class="dz-title">Upload your audio</div>
+      <div class="dz-hint">mp3 &middot; wav &middot; ogg &middot; flac</div>
+    </div>
+    <div id="upload-progress-bg">
+      <div id="upload-progress-bar"></div>
+    </div>
+    <div id="upload-status"></div>
+    <div id="mode-badge">Preloaded species</div>
+    <input type="file" id="audioFileInput" accept="audio/*" style="display:none" />
   </div>
 
   <script type="importmap">
