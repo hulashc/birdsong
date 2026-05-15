@@ -10,18 +10,18 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:         #161616;
+      --bg:         #04060d;
       --text:       #DADADA;
       --text-cream: #E3DACC;
-      --border:     rgba(255, 255, 240, 0.7);
-      --border-dim: rgba(255, 255, 240, 0.2);
-      --faint:      rgba(218, 218, 218, 0.35);
+      --border:     rgba(255, 255, 240, 0.55);
+      --border-dim: rgba(255, 255, 240, 0.15);
+      --faint:      rgba(218, 218, 218, 0.30);
       --clr-teal:   #00c8aa;
       --clr-amber:  rgba(255, 200, 80, 0.9);
       --clr-r:      #ff4d4d;
       --clr-g:      #44ff88;
       --clr-b:      #4d88ff;
-      --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      --font: 'Courier New', 'Helvetica Neue', monospace;
     }
 
     html { -webkit-font-smoothing: antialiased; }
@@ -29,6 +29,30 @@
     canvas { display: block; }
 
     .box { border: 1px solid var(--border); }
+
+    /* ── NODE DATA LABELS ── */
+    .node-label {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      pointer-events: none;
+      transition: opacity 0.25s ease, color 0.25s ease;
+      line-height: 1.4;
+    }
+    .nl-e {
+      font-size: 7.5px;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      opacity: 0.9;
+    }
+    .nl-sc {
+      font-size: 7px;
+      font-family: 'Courier New', monospace;
+      font-weight: 400;
+      letter-spacing: 0.06em;
+      color: rgba(200,220,255,0.7);
+    }
 
     /* ── OVERLAY ── */
     #overlay {
@@ -95,7 +119,7 @@
       background: none; border: none; color: var(--faint);
       font-size: 8px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
       cursor: pointer; pointer-events: all; transition: color 0.2s;
-      display: none; padding: 0 8px;
+      display: none; padding: 0 8px; font-family: var(--font);
     }
     #playBtn:hover { color: var(--text); }
 
@@ -126,7 +150,7 @@
       transition: border-color 0.15s;
     }
     #speciesSelect:hover, #speciesSelect:focus { border-color: var(--border); }
-    #speciesSelect option { background: #1e1e1e; color: var(--text); font-size: 11px; }
+    #speciesSelect option { background: #0d1018; color: var(--text); font-size: 11px; }
     #species-select-wrap::after {
       content: ''; position: absolute; right: 10px; top: 50%;
       transform: translateY(-50%); width: 0; height: 0;
@@ -302,10 +326,12 @@
 
   <div id="legend" aria-label="Colour and size encoding">
     <div class="lg-section">
-      <div class="lg-head">Colour &middot; Energy</div>
-      <div class="lg-row"><span class="swatch" style="background:#3a6fff"></span>Silence</div>
-      <div class="lg-row"><span class="swatch" style="background:#00e5aa"></span>Mid</div>
-      <div class="lg-row"><span class="swatch" style="background:#ff6a00"></span>Peak</div>
+      <div class="lg-head">Heat &middot; Energy</div>
+      <div class="lg-row"><span class="swatch" style="background:#1a0a22"></span>Silence</div>
+      <div class="lg-row"><span class="swatch" style="background:#cc2200"></span>Low</div>
+      <div class="lg-row"><span class="swatch" style="background:#ff8800"></span>Mid</div>
+      <div class="lg-row"><span class="swatch" style="background:#ffee10"></span>High</div>
+      <div class="lg-row"><span class="swatch" style="background:#ffffff"></span>Peak</div>
     </div>
     <div class="lg-section">
       <div class="lg-head">Size &middot; Amplitude</div>
@@ -352,7 +378,6 @@
       <div id="mode-badge"></div>
     </div>
 
-    <!-- K-NN similarity results — shown after upload -->
     <div id="knn-results">
       <div class="sec-label">Closest Species</div>
       <div id="knn-list"></div>
