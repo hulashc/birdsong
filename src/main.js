@@ -159,13 +159,46 @@ function disposeSlot(slot) {
   slot.prevClockTime = -1;
 }
 
-// ── FIX: clear trail geometry draw range to 0 (hides frozen trail lines on pause)
 function clearTrail(slot) {
   slot.trail = [];
   if (slot.trailGeo) {
     slot.trailGeo.setDrawRange(0, 0);
     slot.trailGeo.attributes.position.needsUpdate = true;
   }
+}
+
+// ── Reset edge colours to base brightness (call on pause to clear frozen glow)
+function resetEdgeColors(slot) {
+  if (!slot.edges || !slot.edgeCol || !slot.edgeGeo || !slot.nodeEnergy) return;
+  for (let ei = 0; ei < slot.edges.length; ei++) {
+    const [i, j] = slot.edges[ei];
+    const e = Math.max(slot.nodeEnergy[i], slot.nodeEnergy[j]);
+    const dc = heatColor(e).multiplyScalar(0.85); // matches buildSlot baseline
+    for (let k = 0; k < 2; k++) {
+      slot.edgeCol[(ei*2+k)*3]   = dc.r;
+      slot.edgeCol[(ei*2+k)*3+1] = dc.g;
+      slot.edgeCol[(ei*2+k)*3+2] = dc.b;
+    }
+  }
+  slot.edgeGeo.attributes.color.needsUpdate = true;
+}
+
+// ── Reset node scales to 1 and base colours (call on pause to clear frozen enlarged active node)
+const _pauseDummy = new THREE.Object3D();
+const _pauseColor = new THREE.Color();
+function resetNodeScales(slot) {
+  if (!slot.cloud || !slot.nodes || !slot.nodeEnergy) return;
+  const N = NODE_COUNT;
+  for (let i = 0; i < N; i++) {
+    _pauseDummy.position.set(slot.nodes[i*3], slot.nodes[i*3+1], slot.nodes[i*3+2]);
+    _pauseDummy.scale.set(1, 1, 1);
+    _pauseDummy.updateMatrix();
+    slot.cloud.setMatrixAt(i, _pauseDummy.matrix);
+    _pauseColor.copy(heatColor(slot.nodeEnergy[i])).multiplyScalar(0.90); // matches buildSlot baseline
+    slot.cloud.setColorAt(i, _pauseColor);
+  }
+  slot.cloud.instanceMatrix.needsUpdate = true;
+  slot.cloud.instanceColor.needsUpdate  = true;
 }
 
 function buildEdges(positions, N, k) {
@@ -296,7 +329,6 @@ function buildSlot(slot, manifold) {
   slot.trailGeo  = new THREE.BufferGeometry();
   slot.trailGeo.setAttribute('position', new THREE.BufferAttribute(slot.trailPos, 3));
   slot.trailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.trailCol, 3));
-  // FIX: start with draw range 0 — trail is invisible until playback advances
   slot.trailGeo.setDrawRange(0, 0);
   const trailLine = new THREE.LineSegments(slot.trailGeo,
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1.0 }));
@@ -350,12 +382,9 @@ function tickSlot(slot, delta) {
 
   const target = fracNodeForTime(slot, ct);
 
-  // FIX: clamp lerp so smoothIdx can never overshoot target — eliminates inter-node jitter.
-  // Use delta-scaled alpha so motion speed is frame-rate independent.
   const alpha = clamp(1.0 - Math.pow(0.04, delta), 0, 1);
   const prev  = slot.smoothIdx;
   slot.smoothIdx = prev + alpha * (target - prev);
-  // Hard-clamp: if we've crossed the target integer, snap to it to prevent oscillation
   if ((target - prev) * (target - slot.smoothIdx) < 0) slot.smoothIdx = target;
 
   const ani = clamp(Math.round(slot.smoothIdx), 0, N - 1);
@@ -567,12 +596,17 @@ function pausePlayback() {
   lastRAF = null;
   primary.audio?.pause();
   secondary.audio?.pause();
-  // FIX: clear trail lines immediately so no frozen glow remains while paused
+  // clear animated trail so no frozen glow segments remain
   clearTrail(primary);
   clearTrail(secondary);
-  // FIX: hide halo while paused — no active node indicator when stopped
-  if (primary.haloMat)   primary.haloMat.opacity   = 0;
+  // hide halo — no active node marker while stopped
+  if (primary.haloMat)   primary.haloMat.opacity = 0;
   if (secondary.haloMat) secondary.haloMat.opacity = 0;
+  // reset edge colours and node scales back to base — clears frozen bright active cluster
+  resetEdgeColors(primary);
+  resetEdgeColors(secondary);
+  resetNodeScales(primary);
+  resetNodeScales(secondary);
 }
 
 overlay.addEventListener('click', () => {
@@ -624,11 +658,10 @@ function animate(ts) {
   if (playing) {
     let delta = 0;
     if (lastRAF !== null) {
-      delta = Math.min((ts - lastRAF) / 1000, 0.1); // cap at 100ms to avoid jump on tab restore
+      delta = Math.min((ts - lastRAF) / 1000, 0.1);
       clockTime += delta;
     }
     lastRAF = ts;
-    // Only tick if delta > 0 — skips the first frame after resume to prevent smoothIdx jump
     if (delta > 0) {
       tickSlot(primary, delta);
       if (secondary.manifold) tickSlot(secondary, delta);
