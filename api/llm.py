@@ -8,9 +8,6 @@ Three capabilities:
   2. search(query, species_list)       — natural language → ranked species
   3. chat(history, species_context)    — conversational birdsong assistant
 
-All functions are async and return plain strings / dicts so the
-FastAPI routes can stream or return JSON directly.
-
 The GEMINI_API_KEY env var must be set (Render env vars / local .env).
 If the key is absent the module still imports — endpoints return a
 clear 503 rather than crashing at startup.
@@ -27,7 +24,7 @@ import httpx
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
+    "gemini-2.0-flash:generateContent"
 )
 
 
@@ -64,17 +61,6 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
 
 
 async def describe(species: str, matches: list[dict[str, Any]]) -> str:
-    """
-    Generate a rich natural-language description of a bird species
-    after the acoustic classifier has returned its matches.
-
-    Parameters
-    ----------
-    species : str
-        The top-ranked species name from the classifier.
-    matches : list
-        Full classify() output — list of {rank, species, similarity_pct}.
-    """
     match_summary = ", ".join(
         f"{m['species']} ({m['similarity_pct']:.0f}%)"
         for m in matches[:3]
@@ -98,16 +84,6 @@ Be specific and vivid. Do not use bullet points. Write as flowing prose."""
 
 
 async def search(query: str, species_list: list[str]) -> list[dict[str, Any]]:
-    """
-    Natural language query → ranked list of relevant species.
-
-    Parameters
-    ----------
-    query : str
-        Free-text query, e.g. "birds that sing at dawn near water"
-    species_list : list[str]
-        All species names currently in the store.
-    """
     species_json = json.dumps(species_list)
     prompt = f"""You are a birdsong expert assistant.
 
@@ -126,7 +102,6 @@ Include at most 5 results. If no species match, return an empty array []."""
 
     raw = await _call(prompt, temperature=0.3)
 
-    # Strip markdown code fences if Gemini wraps the JSON
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
@@ -134,7 +109,6 @@ Include at most 5 results. If no species match, return an empty array []."""
 
     try:
         results = json.loads(raw)
-        # Validate structure
         validated = [
             {
                 "species": r["species"],
@@ -153,16 +127,6 @@ async def chat(
     history: list[dict[str, str]],
     species_context: list[str],
 ) -> str:
-    """
-    Multi-turn conversational assistant with species context injected.
-
-    Parameters
-    ----------
-    history : list of {role: 'user'|'assistant', content: str}
-        Conversation history. Last item is the latest user message.
-    species_context : list[str]
-        Species names in the current database (injected as system context).
-    """
     context_str = ", ".join(species_context)
     system = (
         f"You are Birdsong Assistant, an expert ornithologist AI. "
@@ -172,7 +136,6 @@ async def chat(
         f"database, answer generally but note it isn't in the current collection."
     )
 
-    # Build the full prompt with conversation history
     conversation = f"System: {system}\n\n"
     for turn in history:
         role = "User" if turn["role"] == "user" else "Assistant"
