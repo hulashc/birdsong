@@ -51,7 +51,7 @@ function heatColor(e) {
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// ── Error display ──────────────────────────────────────
+// ── Error display ──────────────────────────────────────────
 function showError(msg) {
   const el = document.getElementById('error-state');
   if (el) { el.querySelector('.error-msg').textContent = msg; el.style.display = 'flex'; }
@@ -117,7 +117,7 @@ for (let i = 0; i <= GRID_STEPS; i++) {
 // ── Slot ──────────────────────────────────────────────────
 const NODE_COUNT = 80;
 const KNN_EDGES  = 3;
-const TRAIL_HOPS = 12;
+const TRAIL_HOPS = 20;   // longer trail for trail-only mode
 
 function makeSlot() {
   return {
@@ -167,23 +167,7 @@ function clearTrail(slot) {
   }
 }
 
-// ── Reset edge colours to base brightness (call on pause to clear frozen glow)
-function resetEdgeColors(slot) {
-  if (!slot.edges || !slot.edgeCol || !slot.edgeGeo || !slot.nodeEnergy) return;
-  for (let ei = 0; ei < slot.edges.length; ei++) {
-    const [i, j] = slot.edges[ei];
-    const e = Math.max(slot.nodeEnergy[i], slot.nodeEnergy[j]);
-    const dc = heatColor(e).multiplyScalar(0.85); // matches buildSlot baseline
-    for (let k = 0; k < 2; k++) {
-      slot.edgeCol[(ei*2+k)*3]   = dc.r;
-      slot.edgeCol[(ei*2+k)*3+1] = dc.g;
-      slot.edgeCol[(ei*2+k)*3+2] = dc.b;
-    }
-  }
-  slot.edgeGeo.attributes.color.needsUpdate = true;
-}
-
-// ── Reset node scales to 1 and base colours (call on pause to clear frozen enlarged active node)
+// ── Reset node scales to 1 and base colours (call on pause)
 const _pauseDummy = new THREE.Object3D();
 const _pauseColor = new THREE.Color();
 function resetNodeScales(slot) {
@@ -194,7 +178,7 @@ function resetNodeScales(slot) {
     _pauseDummy.scale.set(1, 1, 1);
     _pauseDummy.updateMatrix();
     slot.cloud.setMatrixAt(i, _pauseDummy.matrix);
-    _pauseColor.copy(heatColor(slot.nodeEnergy[i])).multiplyScalar(0.90); // matches buildSlot baseline
+    _pauseColor.copy(heatColor(slot.nodeEnergy[i])).multiplyScalar(0.90);
     slot.cloud.setColorAt(i, _pauseColor);
   }
   slot.cloud.instanceMatrix.needsUpdate = true;
@@ -254,6 +238,7 @@ function buildSlot(slot, manifold) {
   const edges = buildEdges(nodePos, N, KNN_EDGES);
   slot.edges  = edges;
 
+  // ── Edge geometry is kept for KNN neighbour highlight logic but rendered invisible
   const maxEdgePts = edges.length * 2;
   slot.edgePos = new Float32Array(maxEdgePts * 3);
   slot.edgeCol = new Float32Array(maxEdgePts * 3);
@@ -277,8 +262,9 @@ function buildSlot(slot, manifold) {
   slot.edgeGeo.attributes.position.needsUpdate = true;
   slot.edgeGeo.attributes.color.needsUpdate    = true;
 
+  // opacity: 0 — edge graph hidden, trail is the sole path indicator
   const edgeLine = new THREE.LineSegments(slot.edgeGeo,
-    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 }));
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0 }));
   scene.add(edgeLine);
   slot.objects.push(edgeLine);
 
@@ -416,6 +402,7 @@ function tickSlot(slot, delta) {
   slot.cloud.instanceMatrix.needsUpdate = true;
   slot.cloud.instanceColor.needsUpdate  = true;
 
+  // edge colour updates are kept for neighbour logic but the mesh is invisible (opacity:0)
   const { edgeCol, edgeGeo } = slot;
   for (let ei = 0; ei < edges.length; ei++) {
     const [i, j]    = edges[ei];
@@ -457,7 +444,7 @@ function tickSlot(slot, delta) {
     const a  = slot.trail[s], b = slot.trail[s + 1];
     const ea = nodeEnergy[a], eb = nodeEnergy[b];
     const f  = (s + 1) / segs;
-    const bright = Math.pow(f, 1.0) * 1.8;
+    const bright = Math.pow(f, 0.8) * 2.2;   // brighter trail since edges are hidden
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
     _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.3));
@@ -596,15 +583,10 @@ function pausePlayback() {
   lastRAF = null;
   primary.audio?.pause();
   secondary.audio?.pause();
-  // clear animated trail so no frozen glow segments remain
   clearTrail(primary);
   clearTrail(secondary);
-  // hide halo — no active node marker while stopped
   if (primary.haloMat)   primary.haloMat.opacity = 0;
   if (secondary.haloMat) secondary.haloMat.opacity = 0;
-  // reset edge colours and node scales back to base — clears frozen bright active cluster
-  resetEdgeColors(primary);
-  resetEdgeColors(secondary);
   resetNodeScales(primary);
   resetNodeScales(secondary);
 }
