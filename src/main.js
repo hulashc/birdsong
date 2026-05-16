@@ -8,7 +8,6 @@ import { buildIndex, classify, distToSimilarity } from './knn.js';
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-// Light parchment background: #f4f1eb
 renderer.setClearColor(0xf4f1eb, 1);
 document.body.appendChild(renderer.domElement);
 
@@ -31,25 +30,20 @@ controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
 // ── Colour map (light theme) ───────────────────────────────────────────────
-// On a light background we need dark, saturated colours that read clearly.
 // Ramp: deep brown → crimson → burnt orange → amber → near-black (ink)
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
   if (t < 0.25) {
-    // deep brown to crimson
     const s = t / 0.25;
     c.setRGB(0.22 + s * 0.48, 0.06 + s * 0.04, 0.02);
   } else if (t < 0.55) {
-    // crimson to burnt orange
     const s = (t - 0.25) / 0.30;
     c.setRGB(0.70 + s * 0.20, 0.10 + s * 0.24, 0.02);
   } else if (t < 0.80) {
-    // burnt orange to amber
     const s = (t - 0.55) / 0.25;
     c.setRGB(0.90 + s * 0.05, 0.34 + s * 0.30, 0.02);
   } else {
-    // amber to near-black ink (peak energy = darkest = most contrast)
     const s = (t - 0.80) / 0.20;
     c.setRGB(0.95 - s * 0.85, 0.64 - s * 0.60, 0.02 - s * 0.01);
   }
@@ -67,26 +61,66 @@ function showError(msg) {
 }
 
 // ── Axes ───────────────────────────────────────────────────────────────────
-function addAxis(a, b, hex, op = 0.22) {
+// Significantly increased opacity (0.70) and added dashed tick marks for readability
+function addAxis(a, b, hex, op = 0.70) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
   scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
 }
-// Darker axis colours so they read on cream
-addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xb02010, 0.28);
-addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x106030, 0.28);
-addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x1030a0, 0.28);
+
+// Bold, high-contrast axis colours on cream background
+addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xc0230a, 0.75);  // PC1 red
+addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x1a7a40, 0.75);  // PC2 green
+addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x1a44a8, 0.75);  // PC3 blue
+
+// Tick marks along each axis at 0.4 intervals
+const TICK_STEP = 0.4;
+const TICK_HALF = 0.04;
+for (let v = -1.6; v <= 1.6; v += TICK_STEP) {
+  if (Math.abs(v) < 0.01) continue;
+  // X ticks
+  const xg = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(v, -TICK_HALF, 0), new THREE.Vector3(v, TICK_HALF, 0)
+  ]);
+  scene.add(new THREE.Line(xg, new THREE.LineBasicMaterial({ color: 0xc0230a, transparent: true, opacity: 0.45 })));
+  // Y ticks
+  const yg = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-TICK_HALF, v, 0), new THREE.Vector3(TICK_HALF, v, 0)
+  ]);
+  scene.add(new THREE.Line(yg, new THREE.LineBasicMaterial({ color: 0x1a7a40, transparent: true, opacity: 0.45 })));
+  // Z ticks
+  const zg = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, -TICK_HALF, v), new THREE.Vector3(0, TICK_HALF, v)
+  ]);
+  scene.add(new THREE.Line(zg, new THREE.LineBasicMaterial({ color: 0x1a44a8, transparent: true, opacity: 0.45 })));
+}
 
 function addAxisLabel(text, pos, col) {
   const el = document.createElement('div');
   el.textContent = text;
-  el.style.cssText = `color:${col};font-size:7px;letter-spacing:.3em;font-weight:700;text-transform:uppercase;font-family:'Courier New',monospace;opacity:0.45;padding:1px 4px;`;
+  el.style.cssText = `color:${col};font-size:8px;letter-spacing:.3em;font-weight:700;text-transform:uppercase;font-family:'Courier New',monospace;opacity:0.75;padding:1px 4px;`;
   const obj = new CSS2DObject(el);
   obj.position.copy(pos);
   scene.add(obj);
 }
-addAxisLabel('PC1', new THREE.Vector3(1.64,0.04,0), '#b02010');
-addAxisLabel('PC2', new THREE.Vector3(0.04,1.64,0), '#106030');
-addAxisLabel('PC3', new THREE.Vector3(0.04,0,1.64), '#1030a0');
+addAxisLabel('PC1 · Timbre',   new THREE.Vector3(1.68, 0.06, 0),  '#c0230a');
+addAxisLabel('PC2 · Texture',  new THREE.Vector3(0.06, 1.68, 0),  '#1a7a40');
+addAxisLabel('PC3 · Spectral', new THREE.Vector3(0.06, 0,   1.68),'#1a44a8');
+
+// Grid plane (XZ at y=0) — very faint rule lines
+const GRID_STEPS = 8;
+const GRID_RANGE = 1.6;
+const gridMat = new THREE.LineBasicMaterial({ color: 0x9e9880, transparent: true, opacity: 0.13 });
+for (let i = 0; i <= GRID_STEPS; i++) {
+  const f = -GRID_RANGE + (2 * GRID_RANGE / GRID_STEPS) * i;
+  const gx = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(f, 0, -GRID_RANGE), new THREE.Vector3(f, 0, GRID_RANGE)
+  ]);
+  scene.add(new THREE.Line(gx, gridMat));
+  const gz = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-GRID_RANGE, 0, f), new THREE.Vector3(GRID_RANGE, 0, f)
+  ]);
+  scene.add(new THREE.Line(gz, gridMat));
+}
 
 // ── Slot ───────────────────────────────────────────────────────────────────
 const NODE_COUNT = 80;
@@ -114,8 +148,8 @@ function makeSlot() {
 const primary   = makeSlot();
 const secondary = makeSlot();
 
-const NODE_GEO = new THREE.BoxGeometry(0.013, 0.013, 0.013);
-const HALO_GEO = new THREE.SphereGeometry(0.032, 16, 16);
+const NODE_GEO = new THREE.BoxGeometry(0.016, 0.016, 0.016);
+const HALO_GEO = new THREE.SphereGeometry(0.034, 16, 16);
 
 function disposeSlot(slot) {
   for (const obj of slot.objects) {
@@ -198,9 +232,9 @@ function buildSlot(slot, manifold) {
     const [i, j] = edges[e];
     slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
     slot.edgePos[e*6+3] = nodePos[j*3];   slot.edgePos[e*6+4] = nodePos[j*3+1]; slot.edgePos[e*6+5] = nodePos[j*3+2];
-    // On light bg: resting edges as mid-dark brown-grey
+    // Resting edges: darker for visibility on cream — multiply scalar raised to 0.85
     const e0 = Math.max(nodeE[i], nodeE[j]);
-    const dc = heatColor(e0).multiplyScalar(0.55);
+    const dc = heatColor(e0).multiplyScalar(0.85);
     for (let k = 0; k < 2; k++) {
       slot.edgeCol[(e*2+k)*3]   = dc.r;
       slot.edgeCol[(e*2+k)*3+1] = dc.g;
@@ -226,8 +260,8 @@ function buildSlot(slot, manifold) {
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     cloud.setMatrixAt(i, dummy.matrix);
-    // Resting nodes: full heat colour at 0.75 brightness — dark enough to read on cream
-    nc.copy(heatColor(nodeE[i])).multiplyScalar(0.75);
+    // Resting nodes: full heat colour at 0.90 brightness — clearly visible on cream
+    nc.copy(heatColor(nodeE[i])).multiplyScalar(0.90);
     cloud.setColorAt(i, nc);
   }
   cloud.instanceMatrix.needsUpdate = true;
@@ -252,8 +286,8 @@ function buildSlot(slot, manifold) {
     slot.labelObjects.push(css);
   }
 
-  // Halo: dark ink on light bg
-  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0x1a1710, transparent: true, opacity: 0.45, wireframe: true });
+  // Halo: dark ink, more visible on light bg
+  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0x1a1710, transparent: true, opacity: 0.55, wireframe: true });
   slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
   scene.add(slot.halo);
   slot.objects.push(slot.halo);
@@ -266,7 +300,7 @@ function buildSlot(slot, manifold) {
   slot.trailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.trailCol, 3));
   slot.trailGeo.setDrawRange(0, 0);
   const trailLine = new THREE.LineSegments(slot.trailGeo,
-    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1.0 }));
   scene.add(trailLine);
   slot.objects.push(trailLine);
 
@@ -330,13 +364,13 @@ function tickSlot(slot) {
     const e  = nodeEnergy[i];
     const isActive    = i === ani;
     const isNeighbour = neighbours.has(i);
-    // On light bg: active node goes to full dark ink (multiply > 1 just saturates)
-    const bright = isActive    ? 1.8 + ae * 0.8
-                 : isNeighbour ? 1.0 + e  * 0.5
-                 :               0.75 + e * 0.20;
+    // Active node → full saturated ink; neighbours → bright; resting → clearly visible at 0.90
+    const bright = isActive    ? 1.6 + ae * 0.8
+                 : isNeighbour ? 1.1 + e  * 0.5
+                 :               0.90 + e * 0.15;
     const scale  = isActive    ? 2.8 + ae * 2.0
-                 : isNeighbour ? 1.4 + e  * 0.6
-                 :               0.7 + e  * 0.4;
+                 : isNeighbour ? 1.5 + e  * 0.6
+                 :               0.85 + e  * 0.4;
     _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
     _d.scale.set(scale, scale, scale);
     _d.updateMatrix();
@@ -351,7 +385,8 @@ function tickSlot(slot) {
   for (let ei = 0; ei < edges.length; ei++) {
     const [i, j]    = edges[ei];
     const isActive  = i === ani || j === ani;
-    const bright    = isActive ? 1.2 + ae * 0.6 : 0.55;
+    // Active edges: full brightness; resting edges: 0.85 for clear visibility
+    const bright    = isActive ? 1.3 + ae * 0.6 : 0.85;
     const e         = Math.max(nodeEnergy[i], nodeEnergy[j]);
     const c2        = heatColor(e);
     c2.multiplyScalar(bright);
@@ -366,17 +401,16 @@ function tickSlot(slot) {
   slot.halo.position.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
   const hs = 1.0 + ae * 1.4;
   slot.halo.scale.set(hs, hs, hs);
-  slot.haloMat.opacity = 0.20 + ae * 0.35;
+  slot.haloMat.opacity = 0.28 + ae * 0.42;
 
   for (const { el, nodeIdx } of slot.labels) {
     const dist   = Math.abs(nodeIdx - ani) / N;
     const active = dist < 0.06;
-    el.style.opacity = active ? '0.9' : '0.22';
-    // Active label colour: use heat colour as CSS hex for the dark ramp
+    el.style.opacity = active ? '1.0' : '0.32';
     const hc = heatColor(nodeEnergy[nodeIdx]);
     el.style.color = active
       ? `rgb(${Math.round(hc.r*180)},${Math.round(hc.g*80)},${Math.round(hc.b*20)})`
-      : '#8a806a';
+      : '#6a6050';
   }
 
   if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
@@ -389,11 +423,11 @@ function tickSlot(slot) {
     const a  = slot.trail[s], b = slot.trail[s + 1];
     const ea = nodeEnergy[a], eb = nodeEnergy[b];
     const f  = (s + 1) / segs;
-    // Trail: saturated dark heat colours at decreasing opacity toward tail
-    const bright = Math.pow(f, 1.2) * 1.6;
+    // Trail: rich, dark heat colours — near-black at head, fading toward tail
+    const bright = Math.pow(f, 1.0) * 1.8;
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
-    _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.4));
+    _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.3));
     trailCol[s*6+0] = _c.r; trailCol[s*6+1] = _c.g; trailCol[s*6+2] = _c.b;
     _c.copy(heatColor(eb)).multiplyScalar(bright);
     trailCol[s*6+3] = _c.r; trailCol[s*6+4] = _c.g; trailCol[s*6+5] = _c.b;
