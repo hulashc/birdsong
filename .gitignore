@@ -18,9 +18,9 @@ birds/*.wav
 birds/*.ogg
 birds/*.flac
 
-# Generated data file — regenerate with process_birds.py
-# Comment this line out if you WANT to track a small demo JSON
-birdsong_data.json
+# Generated data file — tracked so Render can serve it
+# Re-commit after running process_birds.py with new species
+# birdsong_data.json  <-- intentionally commented out
 
 # OS
 .DS_Store
