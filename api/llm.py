@@ -24,10 +24,10 @@ from typing import Any
 import httpx
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-# gemini-1.5-flash: widely available, 15 RPM / 1500 RPD free tier
+# gemini-2.0-flash-lite: confirmed available in account, 30 RPM free tier
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
+    "gemini-2.0-flash-lite:generateContent"
 )
 
 _MAX_RETRIES = 3
