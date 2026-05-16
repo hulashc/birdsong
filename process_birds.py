@@ -21,15 +21,15 @@ for filename in os.listdir(BIRDS_FOLDER):
 
     species = os.path.splitext(filename)[0].lower().replace(" ", "_")
     filepath = os.path.join(BIRDS_FOLDER, filename)
-    print(f"Processing: {filename} → '{species}'")
+    print(f"Processing: {filename} \u2192 '{species}'")
 
     try:
         y, sr = librosa.load(filepath, sr=SR, duration=DURATION, mono=True)
 
         if len(y) < N_FFT:
-            print(f"  Skipped — too short"); continue
+            print(f"  Skipped \u2014 too short"); continue
 
-        # ---- Extract all features (all shape: (1 or N, frames)) ----
+        # ---- Extract all features (shape: (n_features, frames)) ----
         mfcc        = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC, n_fft=N_FFT, hop_length=HOP_LENGTH)
         chroma      = librosa.feature.chroma_stft(y=y, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)
         centroid    = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH)
@@ -39,28 +39,29 @@ for filename in os.listdir(BIRDS_FOLDER):
         onset_env   = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP_LENGTH)
         onset_env   = onset_env[np.newaxis, :]  # make 2D (1, frames)
 
-        # ---- Stack into (frames, total_features) ----
-        # Trim all to same frame count first
+        # ---- Trim all to same frame count ----
         n_frames = min(
             mfcc.shape[1], chroma.shape[1], centroid.shape[1],
             bandwidth.shape[1], rolloff.shape[1], zcr.shape[1], onset_env.shape[1]
         )
 
+        # ---- Stack into (frames, 57) ----
+        # Feature layout must match features.js exactly:
+        # [mfcc_0..39, chroma_0..11, centroid, bandwidth, rolloff, zcr, onset]
         feature_matrix = np.vstack([
             mfcc[:, :n_frames],       # 40 features
             chroma[:, :n_frames],     # 12 features
-            centroid[:, :n_frames],   # 1 feature
-            bandwidth[:, :n_frames],  # 1 feature
-            rolloff[:, :n_frames],    # 1 feature
-            zcr[:, :n_frames],        # 1 feature
-            onset_env[:, :n_frames],  # 1 feature
+            centroid[:, :n_frames],   #  1 feature
+            bandwidth[:, :n_frames],  #  1 feature
+            rolloff[:, :n_frames],    #  1 feature
+            zcr[:, :n_frames],        #  1 feature
+            onset_env[:, :n_frames],  #  1 feature
         ]).T  # -> shape: (frames, 57)
 
         if len(feature_matrix) < 3:
-            print(f"  Skipped — too few frames"); continue
+            print(f"  Skipped \u2014 too few frames"); continue
 
         # ---- StandardScaler: normalise each feature to same scale ----
-        # Critical when mixing MFCCs (-200 to 200) with ZCR (0 to 1)
         X = StandardScaler().fit_transform(feature_matrix)
 
         # ---- PCA: 57D -> 3D ----
@@ -77,6 +78,11 @@ for filename in os.listdir(BIRDS_FOLDER):
         rms = rms / (np.percentile(rms, 95) + 1e-9)
         rms = np.clip(rms, 0, 1)
 
+        # ---- Spectral centroid (normalised 0-1 relative to Nyquist) ----
+        # Matches the normalisation in features.js: cent / (sampleRate / 2)
+        nyquist = sr / 2
+        centroid_norm = np.clip(centroid[0, :n_frames] / nyquist, 0, 1)
+
         # ---- Time axis ----
         t = librosa.frames_to_time(
             np.arange(n_frames), sr=sr, hop_length=HOP_LENGTH, n_fft=N_FFT
@@ -89,10 +95,11 @@ for filename in os.listdir(BIRDS_FOLDER):
             "features_used": ["mfcc_40", "chroma_12", "centroid", "bandwidth", "rolloff", "zcr", "onset"],
             "t": t.tolist(),
             "xyz": coords.tolist(),
-            "energy": rms.tolist()
+            "energy": rms.tolist(),
+            "spectral_centroid": centroid_norm.tolist(),  # added: was missing, causing blank node labels
         }
 
-        print(f"  Done — {n_frames} frames, {output[species]['duration_s']:.2f}s, feature_dim=57")
+        print(f"  Done \u2014 {n_frames} frames, {output[species]['duration_s']:.2f}s, feature_dim=57")
 
     except Exception as e:
         print(f"  ERROR: {e}")
