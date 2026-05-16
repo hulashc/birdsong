@@ -4,7 +4,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { initUpload } from './upload.js';
 import { buildIndex, classify, distToSimilarity } from './knn.js';
 
-// ── Renderers ──────────────────────────────────────────────────────────────
+// ── Renderers ──────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -16,7 +16,7 @@ css2d.setSize(innerWidth, innerHeight);
 css2d.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;z-index:5;';
 document.body.appendChild(css2d.domElement);
 
-// ── Scene / Camera ─────────────────────────────────────────────────────────
+// ── Scene / Camera ───────────────────────────────────
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.001, 200);
 camera.position.set(2.4, 1.8, 3.4);
@@ -29,7 +29,7 @@ controls.autoRotateSpeed = 0.25;
 controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
-// ── Colour map (light theme) ───────────────────────────────────────────────
+// ── Colour map (light theme) ─────────────────────────────
 // Ramp: deep brown → crimson → burnt orange → amber → near-black (ink)
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
@@ -52,7 +52,7 @@ function heatColor(e) {
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// ── Error display ──────────────────────────────────────────────────────────
+// ── Error display ──────────────────────────────────────
 function showError(msg) {
   const el = document.getElementById('error-state');
   if (el) { el.querySelector('.error-msg').textContent = msg; el.style.display = 'flex'; }
@@ -60,34 +60,28 @@ function showError(msg) {
   if (ov) ov.style.display = 'none';
 }
 
-// ── Axes ───────────────────────────────────────────────────────────────────
-// Significantly increased opacity (0.70) and added dashed tick marks for readability
+// ── Axes ────────────────────────────────────────────────
 function addAxis(a, b, hex, op = 0.70) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
   scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
 }
 
-// Bold, high-contrast axis colours on cream background
 addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xc0230a, 0.75);  // PC1 red
 addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x1a7a40, 0.75);  // PC2 green
 addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x1a44a8, 0.75);  // PC3 blue
 
-// Tick marks along each axis at 0.4 intervals
 const TICK_STEP = 0.4;
 const TICK_HALF = 0.04;
 for (let v = -1.6; v <= 1.6; v += TICK_STEP) {
   if (Math.abs(v) < 0.01) continue;
-  // X ticks
   const xg = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(v, -TICK_HALF, 0), new THREE.Vector3(v, TICK_HALF, 0)
   ]);
   scene.add(new THREE.Line(xg, new THREE.LineBasicMaterial({ color: 0xc0230a, transparent: true, opacity: 0.45 })));
-  // Y ticks
   const yg = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(-TICK_HALF, v, 0), new THREE.Vector3(TICK_HALF, v, 0)
   ]);
   scene.add(new THREE.Line(yg, new THREE.LineBasicMaterial({ color: 0x1a7a40, transparent: true, opacity: 0.45 })));
-  // Z ticks
   const zg = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, -TICK_HALF, v), new THREE.Vector3(0, TICK_HALF, v)
   ]);
@@ -106,7 +100,6 @@ addAxisLabel('PC1 · Timbre',   new THREE.Vector3(1.68, 0.06, 0),  '#c0230a');
 addAxisLabel('PC2 · Texture',  new THREE.Vector3(0.06, 1.68, 0),  '#1a7a40');
 addAxisLabel('PC3 · Spectral', new THREE.Vector3(0.06, 0,   1.68),'#1a44a8');
 
-// Grid plane (XZ at y=0) — very faint rule lines
 const GRID_STEPS = 8;
 const GRID_RANGE = 1.6;
 const gridMat = new THREE.LineBasicMaterial({ color: 0x9e9880, transparent: true, opacity: 0.13 });
@@ -122,7 +115,7 @@ for (let i = 0; i <= GRID_STEPS; i++) {
   scene.add(new THREE.Line(gz, gridMat));
 }
 
-// ── Slot ───────────────────────────────────────────────────────────────────
+// ── Slot ──────────────────────────────────────────────────
 const NODE_COUNT = 80;
 const KNN_EDGES  = 3;
 const TRAIL_HOPS = 12;
@@ -232,7 +225,6 @@ function buildSlot(slot, manifold) {
     const [i, j] = edges[e];
     slot.edgePos[e*6+0] = nodePos[i*3];   slot.edgePos[e*6+1] = nodePos[i*3+1]; slot.edgePos[e*6+2] = nodePos[i*3+2];
     slot.edgePos[e*6+3] = nodePos[j*3];   slot.edgePos[e*6+4] = nodePos[j*3+1]; slot.edgePos[e*6+5] = nodePos[j*3+2];
-    // Resting edges: darker for visibility on cream — multiply scalar raised to 0.85
     const e0 = Math.max(nodeE[i], nodeE[j]);
     const dc = heatColor(e0).multiplyScalar(0.85);
     for (let k = 0; k < 2; k++) {
@@ -260,7 +252,6 @@ function buildSlot(slot, manifold) {
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     cloud.setMatrixAt(i, dummy.matrix);
-    // Resting nodes: full heat colour at 0.90 brightness — clearly visible on cream
     nc.copy(heatColor(nodeE[i])).multiplyScalar(0.90);
     cloud.setColorAt(i, nc);
   }
@@ -286,7 +277,6 @@ function buildSlot(slot, manifold) {
     slot.labelObjects.push(css);
   }
 
-  // Halo: dark ink, more visible on light bg
   slot.haloMat = new THREE.MeshBasicMaterial({ color: 0x1a1710, transparent: true, opacity: 0.55, wireframe: true });
   slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
   scene.add(slot.halo);
@@ -309,7 +299,7 @@ function buildSlot(slot, manifold) {
   slot.prevClockTime = -1;
 }
 
-// ── Clock ──────────────────────────────────────────────────────────────────
+// ── Clock ────────────────────────────────────────────────
 let clockTime = 0;
 let lastRAF   = null;
 let playing   = false;
@@ -339,7 +329,7 @@ function fracNodeForTime(slot, ct) {
   return clamp(rawIdx / nodeStep, 0, NODE_COUNT - 1);
 }
 
-// ── Per-frame update ───────────────────────────────────────────────────────
+// ── Per-frame update ─────────────────────────────────────────
 const _d = new THREE.Object3D();
 const _c = new THREE.Color();
 
@@ -364,7 +354,6 @@ function tickSlot(slot) {
     const e  = nodeEnergy[i];
     const isActive    = i === ani;
     const isNeighbour = neighbours.has(i);
-    // Active node → full saturated ink; neighbours → bright; resting → clearly visible at 0.90
     const bright = isActive    ? 1.6 + ae * 0.8
                  : isNeighbour ? 1.1 + e  * 0.5
                  :               0.90 + e * 0.15;
@@ -385,7 +374,6 @@ function tickSlot(slot) {
   for (let ei = 0; ei < edges.length; ei++) {
     const [i, j]    = edges[ei];
     const isActive  = i === ani || j === ani;
-    // Active edges: full brightness; resting edges: 0.85 for clear visibility
     const bright    = isActive ? 1.3 + ae * 0.6 : 0.85;
     const e         = Math.max(nodeEnergy[i], nodeEnergy[j]);
     const c2        = heatColor(e);
@@ -423,7 +411,6 @@ function tickSlot(slot) {
     const a  = slot.trail[s], b = slot.trail[s + 1];
     const ea = nodeEnergy[a], eb = nodeEnergy[b];
     const f  = (s + 1) / segs;
-    // Trail: rich, dark heat colours — near-black at head, fading toward tail
     const bright = Math.pow(f, 1.0) * 1.8;
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
@@ -437,7 +424,7 @@ function tickSlot(slot) {
   trailGeo.attributes.color.needsUpdate    = true;
 }
 
-// ── Audio helpers ──────────────────────────────────────────────────────────
+// ── Audio helpers ──────────────────────────────────────────
 function loadAudioForSlot(slot, key) {
   if (slot.audio) { slot.audio.pause(); slot.audio.src = ''; }
   slot.audioReady = false;
@@ -458,22 +445,35 @@ function loadAudioForSlot(slot, key) {
   tryNext();
 }
 
-// ── Load data ──────────────────────────────────────────────────────────────
-let allData;
+// ── Load data ──────────────────────────────────────────────
+let allData = null;
 try {
   const res = await fetch('./birdsong_data.json');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   allData = await res.json();
-} catch (err) { showError(`Failed to load data: ${err.message}`); throw err; }
+} catch (err) {
+  // Show error UI and stop — do NOT re-throw (avoids uncaught module rejection)
+  showError(`Failed to load data: ${err.message}`);
+  console.error('[birdsong] Data load failed:', err);
+}
+
+// Guard: stop module execution cleanly if data failed to load
+if (!allData) throw new DOMException('Data unavailable', 'AbortError');
 
 const isSingle    = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
 const speciesMap  = isSingle ? { [(allData.species || 'birdsong')]: allData } : allData;
 const speciesKeys = Object.keys(speciesMap);
-if (!speciesKeys.length) { showError('birdsong_data.json is empty.'); throw new Error('Empty'); }
+
+if (!speciesKeys.length) {
+  // Show error UI and stop — do NOT re-throw
+  showError('birdsong_data.json is empty or malformed.');
+  console.error('[birdsong] Empty species map');
+  throw new DOMException('Empty data', 'AbortError');
+}
 
 const knnIndex = buildIndex(speciesMap);
 
-// ── Dropdown ───────────────────────────────────────────────────────────────
+// ── Dropdown ───────────────────────────────────────────────
 const select = document.getElementById('speciesSelect');
 select.innerHTML = '';
 for (const key of speciesKeys) {
@@ -531,7 +531,7 @@ select.addEventListener('change', () => {
   loadSpecies(select.value);
 });
 
-// ── Overlay / Pause ────────────────────────────────────────────────────────
+// ── Overlay / Pause ────────────────────────────────────────────
 const overlay   = document.getElementById('overlay');
 const playBtn   = document.getElementById('playBtn');
 const modeBadge = document.getElementById('mode-badge');
@@ -566,7 +566,7 @@ playBtn.addEventListener('click', e => {
   if (playing) pausePlayback(); else startPlayback();
 });
 
-// ── Upload ─────────────────────────────────────────────────────────────────
+// ── Upload ──────────────────────────────────────────────────
 initUpload({
   onManifold(m, file) {
     buildSlot(secondary, m);
@@ -596,7 +596,7 @@ initUpload({
   },
 });
 
-// ── Animation loop ─────────────────────────────────────────────────────────
+// ── Animation loop ─────────────────────────────────────────────
 function animate(ts) {
   requestAnimationFrame(animate);
   controls.update();
