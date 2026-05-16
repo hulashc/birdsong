@@ -29,7 +29,7 @@ controls.autoRotateSpeed = 0.25;
 controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
-// ── Colour map (light theme) ─────────────────────────────
+// ── Colour map ──────────────────────────────────────
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
@@ -51,7 +51,7 @@ function heatColor(e) {
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// ── Error display ──────────────────────────────────────────
+// ── Error display ──────────────────────────────────────
 function showError(msg) {
   const el = document.getElementById('error-state');
   if (el) { el.querySelector('.error-msg').textContent = msg; el.style.display = 'flex'; }
@@ -59,7 +59,7 @@ function showError(msg) {
   if (ov) ov.style.display = 'none';
 }
 
-// ── Axes ────────────────────────────────────────────────
+// ── Axes ─────────────────────────────────────────────
 function addAxis(a, b, hex, op = 0.70) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
   scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
@@ -114,10 +114,33 @@ for (let i = 0; i <= GRID_STEPS; i++) {
   scene.add(new THREE.Line(gz, gridMat));
 }
 
-// ── Slot ──────────────────────────────────────────────────
+// ── Slot ─────────────────────────────────────────────
 const NODE_COUNT = 80;
 const KNN_EDGES  = 3;
-const TRAIL_HOPS = 20;   // longer trail for trail-only mode
+const TRAIL_HOPS = 20;
+
+// ── Edge memoization — skip rebuild if same nodePos buffer ──
+const _edgeCache = new WeakMap();
+function buildEdgesMemo(nodePos, N, k) {
+  if (_edgeCache.has(nodePos)) return _edgeCache.get(nodePos);
+  const edges = [];
+  for (let i = 0; i < N; i++) {
+    const ax = nodePos[i*3], ay = nodePos[i*3+1], az = nodePos[i*3+2];
+    const dists = [];
+    for (let j = 0; j < N; j++) {
+      if (i === j) continue;
+      const dx = ax - nodePos[j*3], dy = ay - nodePos[j*3+1], dz = az - nodePos[j*3+2];
+      dists.push([j, dx*dx + dy*dy + dz*dz]);
+    }
+    dists.sort((a, b) => a[1] - b[1]);
+    for (let ki = 0; ki < Math.min(k, dists.length); ki++) {
+      const j = dists[ki][0];
+      if (j > i) edges.push([i, j]);
+    }
+  }
+  _edgeCache.set(nodePos, edges);
+  return edges;
+}
 
 function makeSlot() {
   return {
@@ -134,6 +157,7 @@ function makeSlot() {
     objects: [], labelObjects: [],
     smoothIdx: 0,
     prevClockTime: -1,
+    prevAni: -1,       // ← cache: skip GPU write when active node unchanged
   };
 }
 
@@ -157,6 +181,7 @@ function disposeSlot(slot) {
   slot.trail = [];
   slot.smoothIdx = 0;
   slot.prevClockTime = -1;
+  slot.prevAni = -1;
 }
 
 function clearTrail(slot) {
@@ -167,13 +192,11 @@ function clearTrail(slot) {
   }
 }
 
-// ── Reset node scales to 1 and base colours (call on pause)
 const _pauseDummy = new THREE.Object3D();
 const _pauseColor = new THREE.Color();
 function resetNodeScales(slot) {
   if (!slot.cloud || !slot.nodes || !slot.nodeEnergy) return;
-  const N = NODE_COUNT;
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < NODE_COUNT; i++) {
     _pauseDummy.position.set(slot.nodes[i*3], slot.nodes[i*3+1], slot.nodes[i*3+2]);
     _pauseDummy.scale.set(1, 1, 1);
     _pauseDummy.updateMatrix();
@@ -183,25 +206,7 @@ function resetNodeScales(slot) {
   }
   slot.cloud.instanceMatrix.needsUpdate = true;
   slot.cloud.instanceColor.needsUpdate  = true;
-}
-
-function buildEdges(positions, N, k) {
-  const edges = [];
-  for (let i = 0; i < N; i++) {
-    const ax = positions[i*3], ay = positions[i*3+1], az = positions[i*3+2];
-    const dists = [];
-    for (let j = 0; j < N; j++) {
-      if (i === j) continue;
-      const dx = ax - positions[j*3], dy = ay - positions[j*3+1], dz = az - positions[j*3+2];
-      dists.push([j, dx*dx + dy*dy + dz*dz]);
-    }
-    dists.sort((a, b) => a[1] - b[1]);
-    for (let ki = 0; ki < Math.min(k, dists.length); ki++) {
-      const j = dists[ki][0];
-      if (j > i) edges.push([i, j]);
-    }
-  }
-  return edges;
+  slot.prevAni = -1;
 }
 
 function buildSlot(slot, manifold) {
@@ -235,10 +240,9 @@ function buildSlot(slot, manifold) {
   slot.nodeEnergy = nodeE;
   slot.nodeRawIdx = nodeRaw;
 
-  const edges = buildEdges(nodePos, N, KNN_EDGES);
+  const edges = buildEdgesMemo(nodePos, N, KNN_EDGES);
   slot.edges  = edges;
 
-  // ── Edge geometry is kept for KNN neighbour highlight logic but rendered invisible
   const maxEdgePts = edges.length * 2;
   slot.edgePos = new Float32Array(maxEdgePts * 3);
   slot.edgeCol = new Float32Array(maxEdgePts * 3);
@@ -324,9 +328,10 @@ function buildSlot(slot, manifold) {
   slot.manifold = { times, energy: rawE, rawPts, duration_s: dur, N };
   slot.smoothIdx = 0;
   slot.prevClockTime = -1;
+  slot.prevAni = -1;
 }
 
-// ── Clock ────────────────────────────────────────────────
+// ── Clock ─────────────────────────────────────────────
 let clockTime = 0;
 let lastRAF   = null;
 let playing   = false;
@@ -343,9 +348,7 @@ function fracNodeForTime(slot, ct) {
 
   if (slot.prevClockTime >= 0) {
     const prevTT = dur > 0 ? slot.prevClockTime % dur : slot.prevClockTime;
-    if (prevTT - tt > dur * 0.4) {
-      slot.smoothIdx = 0;
-    }
+    if (prevTT - tt > dur * 0.4) slot.smoothIdx = 0;
   }
   slot.prevClockTime = ct;
 
@@ -356,7 +359,7 @@ function fracNodeForTime(slot, ct) {
   return clamp(rawIdx / nodeStep, 0, NODE_COUNT - 1);
 }
 
-// ── Per-frame update ─────────────────────────────────────────
+// ── Per-frame update ────────────────────────────────────
 const _d = new THREE.Object3D();
 const _c = new THREE.Color();
 
@@ -367,73 +370,81 @@ function tickSlot(slot, delta) {
   const ct = currentTime(slot);
 
   const target = fracNodeForTime(slot, ct);
-
-  const alpha = clamp(1.0 - Math.pow(0.04, delta), 0, 1);
-  const prev  = slot.smoothIdx;
+  const alpha  = clamp(1.0 - Math.pow(0.04, delta), 0, 1);
+  const prev   = slot.smoothIdx;
   slot.smoothIdx = prev + alpha * (target - prev);
   if ((target - prev) * (target - slot.smoothIdx) < 0) slot.smoothIdx = target;
 
   const ani = clamp(Math.round(slot.smoothIdx), 0, N - 1);
-  const ae  = nodeEnergy[ani];
 
-  const neighbours = new Set();
-  for (const [i, j] of edges) {
-    if (i === ani) neighbours.add(j);
-    if (j === ani) neighbours.add(i);
-  }
+  // ── Guard: only rewrite GPU buffers when the active node actually changed ──
+  const nodeChanged = ani !== slot.prevAni;
+  slot.prevAni = ani;
 
-  for (let i = 0; i < N; i++) {
-    const e  = nodeEnergy[i];
-    const isActive    = i === ani;
-    const isNeighbour = neighbours.has(i);
-    const bright = isActive    ? 1.6 + ae * 0.8
-                 : isNeighbour ? 1.1 + e  * 0.5
-                 :               0.90 + e * 0.15;
-    const scale  = isActive    ? 2.8 + ae * 2.0
-                 : isNeighbour ? 1.5 + e  * 0.6
-                 :               0.85 + e  * 0.4;
-    _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
-    _d.scale.set(scale, scale, scale);
-    _d.updateMatrix();
-    slot.cloud.setMatrixAt(i, _d.matrix);
-    _c.copy(heatColor(e)).multiplyScalar(bright);
-    slot.cloud.setColorAt(i, _c);
-  }
-  slot.cloud.instanceMatrix.needsUpdate = true;
-  slot.cloud.instanceColor.needsUpdate  = true;
+  const ae = nodeEnergy[ani];
 
-  // edge colour updates are kept for neighbour logic but the mesh is invisible (opacity:0)
-  const { edgeCol, edgeGeo } = slot;
-  for (let ei = 0; ei < edges.length; ei++) {
-    const [i, j]    = edges[ei];
-    const isActive  = i === ani || j === ani;
-    const bright    = isActive ? 1.3 + ae * 0.6 : 0.85;
-    const e         = Math.max(nodeEnergy[i], nodeEnergy[j]);
-    const c2        = heatColor(e);
-    c2.multiplyScalar(bright);
-    for (let k = 0; k < 2; k++) {
-      edgeCol[(ei*2+k)*3]   = c2.r;
-      edgeCol[(ei*2+k)*3+1] = c2.g;
-      edgeCol[(ei*2+k)*3+2] = c2.b;
+  if (nodeChanged) {
+    const neighbours = new Set();
+    for (const [i, j] of edges) {
+      if (i === ani) neighbours.add(j);
+      if (j === ani) neighbours.add(i);
+    }
+
+    for (let i = 0; i < N; i++) {
+      const e  = nodeEnergy[i];
+      const isActive    = i === ani;
+      const isNeighbour = neighbours.has(i);
+      const bright = isActive    ? 1.6 + ae * 0.8
+                   : isNeighbour ? 1.1 + e  * 0.5
+                   :               0.90 + e * 0.15;
+      const scale  = isActive    ? 2.8 + ae * 2.0
+                   : isNeighbour ? 1.5 + e  * 0.6
+                   :               0.85 + e  * 0.4;
+      _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
+      _d.scale.set(scale, scale, scale);
+      _d.updateMatrix();
+      slot.cloud.setMatrixAt(i, _d.matrix);
+      _c.copy(heatColor(e)).multiplyScalar(bright);
+      slot.cloud.setColorAt(i, _c);
+    }
+    slot.cloud.instanceMatrix.needsUpdate = true;
+    slot.cloud.instanceColor.needsUpdate  = true;
+
+    // edge colours — invisible mesh, still update for correctness
+    const { edgeCol, edgeGeo } = slot;
+    for (let ei = 0; ei < edges.length; ei++) {
+      const [i, j]   = edges[ei];
+      const isActive = i === ani || j === ani;
+      const bright   = isActive ? 1.3 + ae * 0.6 : 0.85;
+      const e        = Math.max(nodeEnergy[i], nodeEnergy[j]);
+      const c2       = heatColor(e).multiplyScalar(bright);
+      for (let k = 0; k < 2; k++) {
+        edgeCol[(ei*2+k)*3]   = c2.r;
+        edgeCol[(ei*2+k)*3+1] = c2.g;
+        edgeCol[(ei*2+k)*3+2] = c2.b;
+      }
+    }
+    edgeGeo.attributes.color.needsUpdate = true;
+
+    // labels
+    for (const { el, nodeIdx } of slot.labels) {
+      const dist   = Math.abs(nodeIdx - ani) / N;
+      const active = dist < 0.06;
+      el.style.opacity = active ? '1.0' : '0.32';
+      const hc = heatColor(nodeEnergy[nodeIdx]);
+      el.style.color = active
+        ? `rgb(${Math.round(hc.r*180)},${Math.round(hc.g*80)},${Math.round(hc.b*20)})`
+        : '#6a6050';
     }
   }
-  edgeGeo.attributes.color.needsUpdate = true;
 
+  // halo always updates (smooth scale/opacity animation)
   slot.halo.position.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
   const hs = 1.0 + ae * 1.4;
   slot.halo.scale.set(hs, hs, hs);
   slot.haloMat.opacity = 0.28 + ae * 0.42;
 
-  for (const { el, nodeIdx } of slot.labels) {
-    const dist   = Math.abs(nodeIdx - ani) / N;
-    const active = dist < 0.06;
-    el.style.opacity = active ? '1.0' : '0.32';
-    const hc = heatColor(nodeEnergy[nodeIdx]);
-    el.style.color = active
-      ? `rgb(${Math.round(hc.r*180)},${Math.round(hc.g*80)},${Math.round(hc.b*20)})`
-      : '#6a6050';
-  }
-
+  // trail always updates
   if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
   if (slot.trail.length > TRAIL_HOPS + 1) slot.trail.shift();
 
@@ -444,7 +455,7 @@ function tickSlot(slot, delta) {
     const a  = slot.trail[s], b = slot.trail[s + 1];
     const ea = nodeEnergy[a], eb = nodeEnergy[b];
     const f  = (s + 1) / segs;
-    const bright = Math.pow(f, 0.8) * 2.2;   // brighter trail since edges are hidden
+    const bright = Math.pow(f, 0.8) * 2.2;
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
     _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.3));
@@ -457,7 +468,7 @@ function tickSlot(slot, delta) {
   trailGeo.attributes.color.needsUpdate    = true;
 }
 
-// ── Audio helpers ──────────────────────────────────────────
+// ── Audio helpers ──────────────────────────────────────
 function loadAudioForSlot(slot, key) {
   if (slot.audio) { slot.audio.pause(); slot.audio.src = ''; }
   slot.audioReady = false;
@@ -478,7 +489,7 @@ function loadAudioForSlot(slot, key) {
   tryNext();
 }
 
-// ── Load data ──────────────────────────────────────────────
+// ── Load data ──────────────────────────────────────────
 let allData = null;
 try {
   const res = await fetch('./birdsong_data.json');
@@ -497,13 +508,12 @@ const speciesKeys = Object.keys(speciesMap);
 
 if (!speciesKeys.length) {
   showError('birdsong_data.json is empty or malformed.');
-  console.error('[birdsong] Empty species map');
   throw new DOMException('Empty data', 'AbortError');
 }
 
 const knnIndex = buildIndex(speciesMap);
 
-// ── Dropdown ───────────────────────────────────────────────
+// ── Dropdown ───────────────────────────────────────────
 const select = document.getElementById('speciesSelect');
 select.innerHTML = '';
 for (const key of speciesKeys) {
@@ -561,7 +571,7 @@ select.addEventListener('change', () => {
   loadSpecies(select.value);
 });
 
-// ── Overlay / Pause ────────────────────────────────────────────
+// ── Overlay / Pause ────────────────────────────────────
 const overlay   = document.getElementById('overlay');
 const playBtn   = document.getElementById('playBtn');
 const modeBadge = document.getElementById('mode-badge');
@@ -602,7 +612,7 @@ playBtn.addEventListener('click', e => {
   if (playing) pausePlayback(); else startPlayback();
 });
 
-// ── Upload ──────────────────────────────────────────────────
+// ── Upload ──────────────────────────────────────────────
 initUpload({
   onManifold(m, file) {
     buildSlot(secondary, m);
@@ -632,7 +642,7 @@ initUpload({
   },
 });
 
-// ── Animation loop ─────────────────────────────────────────────
+// ── Animation loop ─────────────────────────────────────
 function animate(ts) {
   requestAnimationFrame(animate);
   controls.update();
