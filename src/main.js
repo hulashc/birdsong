@@ -30,7 +30,6 @@ controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
 // ── Colour map (light theme) ─────────────────────────────
-// Ramp: deep brown → crimson → burnt orange → amber → near-black (ink)
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
@@ -66,9 +65,9 @@ function addAxis(a, b, hex, op = 0.70) {
   scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
 }
 
-addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xc0230a, 0.75);  // PC1 red
-addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x1a7a40, 0.75);  // PC2 green
-addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x1a44a8, 0.75);  // PC3 blue
+addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xc0230a, 0.75);
+addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x1a7a40, 0.75);
+addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x1a44a8, 0.75);
 
 const TICK_STEP = 0.4;
 const TICK_HALF = 0.04;
@@ -158,6 +157,15 @@ function disposeSlot(slot) {
   slot.trail = [];
   slot.smoothIdx = 0;
   slot.prevClockTime = -1;
+}
+
+// ── FIX: clear trail geometry draw range to 0 (hides frozen trail lines on pause)
+function clearTrail(slot) {
+  slot.trail = [];
+  if (slot.trailGeo) {
+    slot.trailGeo.setDrawRange(0, 0);
+    slot.trailGeo.attributes.position.needsUpdate = true;
+  }
 }
 
 function buildEdges(positions, N, k) {
@@ -277,7 +285,7 @@ function buildSlot(slot, manifold) {
     slot.labelObjects.push(css);
   }
 
-  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0x1a1710, transparent: true, opacity: 0.55, wireframe: true });
+  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0x1a1710, transparent: true, opacity: 0, wireframe: true });
   slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
   scene.add(slot.halo);
   slot.objects.push(slot.halo);
@@ -288,6 +296,7 @@ function buildSlot(slot, manifold) {
   slot.trailGeo  = new THREE.BufferGeometry();
   slot.trailGeo.setAttribute('position', new THREE.BufferAttribute(slot.trailPos, 3));
   slot.trailGeo.setAttribute('color',    new THREE.BufferAttribute(slot.trailCol, 3));
+  // FIX: start with draw range 0 — trail is invisible until playback advances
   slot.trailGeo.setDrawRange(0, 0);
   const trailLine = new THREE.LineSegments(slot.trailGeo,
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1.0 }));
@@ -333,16 +342,24 @@ function fracNodeForTime(slot, ct) {
 const _d = new THREE.Object3D();
 const _c = new THREE.Color();
 
-function tickSlot(slot) {
+function tickSlot(slot, delta) {
   if (!slot.manifold || !slot.cloud) return;
   const { nodes, nodeEnergy, edges } = slot;
   const N  = NODE_COUNT;
   const ct = currentTime(slot);
 
-  const target   = fracNodeForTime(slot, ct);
-  slot.smoothIdx = slot.smoothIdx + 0.18 * (target - slot.smoothIdx);
-  const ani      = clamp(Math.round(slot.smoothIdx), 0, N - 1);
-  const ae       = nodeEnergy[ani];
+  const target = fracNodeForTime(slot, ct);
+
+  // FIX: clamp lerp so smoothIdx can never overshoot target — eliminates inter-node jitter.
+  // Use delta-scaled alpha so motion speed is frame-rate independent.
+  const alpha = clamp(1.0 - Math.pow(0.04, delta), 0, 1);
+  const prev  = slot.smoothIdx;
+  slot.smoothIdx = prev + alpha * (target - prev);
+  // Hard-clamp: if we've crossed the target integer, snap to it to prevent oscillation
+  if ((target - prev) * (target - slot.smoothIdx) < 0) slot.smoothIdx = target;
+
+  const ani = clamp(Math.round(slot.smoothIdx), 0, N - 1);
+  const ae  = nodeEnergy[ani];
 
   const neighbours = new Set();
   for (const [i, j] of edges) {
@@ -452,12 +469,10 @@ try {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   allData = await res.json();
 } catch (err) {
-  // Show error UI and stop — do NOT re-throw (avoids uncaught module rejection)
   showError(`Failed to load data: ${err.message}`);
   console.error('[birdsong] Data load failed:', err);
 }
 
-// Guard: stop module execution cleanly if data failed to load
 if (!allData) throw new DOMException('Data unavailable', 'AbortError');
 
 const isSingle    = Array.isArray(allData?.t) && Array.isArray(allData?.xyz);
@@ -465,7 +480,6 @@ const speciesMap  = isSingle ? { [(allData.species || 'birdsong')]: allData } : 
 const speciesKeys = Object.keys(speciesMap);
 
 if (!speciesKeys.length) {
-  // Show error UI and stop — do NOT re-throw
   showError('birdsong_data.json is empty or malformed.');
   console.error('[birdsong] Empty species map');
   throw new DOMException('Empty data', 'AbortError');
@@ -553,6 +567,12 @@ function pausePlayback() {
   lastRAF = null;
   primary.audio?.pause();
   secondary.audio?.pause();
+  // FIX: clear trail lines immediately so no frozen glow remains while paused
+  clearTrail(primary);
+  clearTrail(secondary);
+  // FIX: hide halo while paused — no active node indicator when stopped
+  if (primary.haloMat)   primary.haloMat.opacity   = 0;
+  if (secondary.haloMat) secondary.haloMat.opacity = 0;
 }
 
 overlay.addEventListener('click', () => {
@@ -602,13 +622,17 @@ function animate(ts) {
   controls.update();
 
   if (playing) {
+    let delta = 0;
     if (lastRAF !== null) {
-      const delta = (ts - lastRAF) / 1000;
-      clockTime += Math.min(delta, 0.5);
+      delta = Math.min((ts - lastRAF) / 1000, 0.1); // cap at 100ms to avoid jump on tab restore
+      clockTime += delta;
     }
     lastRAF = ts;
-    tickSlot(primary);
-    if (secondary.manifold) tickSlot(secondary);
+    // Only tick if delta > 0 — skips the first frame after resume to prevent smoothIdx jump
+    if (delta > 0) {
+      tickSlot(primary, delta);
+      if (secondary.manifold) tickSlot(secondary, delta);
+    }
   }
   renderer.render(scene, camera);
   css2d.render(scene, camera);
