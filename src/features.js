@@ -4,10 +4,13 @@
  * Extracts MFCCs, chroma, spectral centroid/bandwidth/rolloff,
  * zero-crossing rate, onset strength, and RMS energy — matching
  * the Python process_birds.py pipeline output schema.
+ *
+ * Feature vector layout (57 dims — must match process_birds.py exactly):
+ *   [mfcc_0..39, chroma_0..11, centroid, bandwidth, rolloff, zcr, onset]
  */
 
 // ── Constants ─────────────────────────────────────
-const N_MFCC      = 13;
+const N_MFCC      = 40;   // MUST match process_birds.py N_MFCC=40
 const N_CHROMA    = 12;
 const N_FFT       = 2048;
 const HOP_LENGTH  = 512;
@@ -177,9 +180,9 @@ function normalise(arr) {
 
 /**
  * PCA via power iteration.
- * FIX: seed vector is deterministic (all-ones normalised) so the eigenvector
+ * Seed vector is deterministic (all-ones normalised) so the eigenvector
  * always converges to the same direction — no random noise baked into xyz.
- * Iterations raised from 80 → 200 for reliable convergence on 57-dim input.
+ * Iterations raised to 200 for reliable convergence on 57-dim input.
  */
 function pcaProject(matrix, nComponents = 3) {
   const nFrames = matrix.length;
@@ -207,7 +210,6 @@ function pcaProject(matrix, nComponents = 3) {
   const vecs = [];
   const deflated = cov.map(r => Array.from(r));
   for (let k = 0; k < nComponents; k++) {
-    // Deterministic seed: all-ones normalised
     const seedVal = 1 / Math.sqrt(nFeats);
     let v = new Array(nFeats).fill(seedVal);
 
@@ -251,7 +253,7 @@ function pcaProject(matrix, nComponents = 3) {
 /**
  * extractManifold(file, onProgress)
  *
- * FIX: Downsampling now uses linear interpolation over evenly-spaced time
+ * Downsampling uses linear interpolation over evenly-spaced time
  * positions instead of integer frame stepping. This produces a perfectly
  * uniform t[] array so fracNodeForTime's binary search never stutters.
  */
@@ -292,6 +294,7 @@ export async function extractManifold(file, onProgress = () => {}) {
   const featureMatrix = [];
   const energyArr     = [];
   const timeArr       = [];
+  const centroidArr   = [];
   let prevMag = null;
 
   for (let f = 0; f < nFrames; f++) {
@@ -304,8 +307,8 @@ export async function extractManifold(file, onProgress = () => {}) {
       return Math.log(s + 1e-10);
     });
 
-    const mfcc   = dct2(melE);
-    const chroma = chromaFromMag(mag, sampleRate);
+    const mfcc   = dct2(melE);           // 40 coefficients
+    const chroma = chromaFromMag(mag, sampleRate);  // 12
     const cent   = spectralCentroid(mag, sampleRate);
     const bw     = spectralBandwidth(mag, sampleRate, cent);
     const roll   = spectralRolloff(mag, sampleRate);
@@ -315,19 +318,20 @@ export async function extractManifold(file, onProgress = () => {}) {
 
     prevMag = mag;
 
+    // Feature layout must match process_birds.py exactly (57 dims):
+    // [mfcc_0..39, chroma_0..11, centroid, bandwidth, rolloff, zcr, onset]
     featureMatrix.push([
-      ...Array.from(mfcc),
-      ...Array.from(chroma),
-      cent / (sampleRate / 2),
-      bw   / (sampleRate / 2),
-      roll / (sampleRate / 2),
-      z,
-      Math.min(onset / 10, 1),
+      ...Array.from(mfcc),                 // 40
+      ...Array.from(chroma),               // 12
+      cent / (sampleRate / 2),             //  1 — normalised centroid
+      bw   / (sampleRate / 2),             //  1
+      roll / (sampleRate / 2),             //  1
+      z,                                   //  1
+      Math.min(onset / 10, 1),             //  1  → total: 57
     ]);
     energyArr.push(e);
     timeArr.push(t);
-
-    if (f % 50 === 0) onProgress(0.70 + (f / nFrames) * 0.15);
+    centroidArr.push(cent);  // raw Hz for display in node labels
   }
 
   onProgress(0.85);
@@ -335,42 +339,43 @@ export async function extractManifold(file, onProgress = () => {}) {
   const normEnergy = normalise(energyArr);
   const xyz3d      = pcaProject(featureMatrix, 3);
 
+  // Normalise spectral centroid for display (0–1 relative to Nyquist)
+  const normCentroid = normalise(centroidArr);
+
   onProgress(0.97);
 
   // ── Downsample via linear interpolation over evenly-spaced time positions
-  // This guarantees a perfectly uniform t[] so the binary search in
-  // fracNodeForTime never encounters uneven gaps that cause stutter.
   const maxFrames   = 500;
   const totalFrames = Math.min(nFrames, maxFrames);
   const t_out   = [];
   const xyz_out = [];
   const e_out   = [];
+  const sc_out  = [];
 
   for (let s = 0; s < totalFrames; s++) {
-    // Exact fractional position in the original frame array
     const frac = s / (totalFrames - 1) * (nFrames - 1);
     const lo   = Math.floor(frac);
     const hi   = Math.min(lo + 1, nFrames - 1);
-    const w    = frac - lo; // interpolation weight
+    const w    = frac - lo;
 
-    const t_interp = timeArr[lo] * (1 - w) + timeArr[hi] * w;
-    const e_interp = normEnergy[lo] * (1 - w) + normEnergy[hi] * w;
-    const x_interp = xyz3d[lo][0] * (1 - w) + xyz3d[hi][0] * w;
-    const y_interp = xyz3d[lo][1] * (1 - w) + xyz3d[hi][1] * w;
-    const z_interp = xyz3d[lo][2] * (1 - w) + xyz3d[hi][2] * w;
-
-    t_out.push(+t_interp.toFixed(4));
-    xyz_out.push([+x_interp.toFixed(5), +y_interp.toFixed(5), +z_interp.toFixed(5)]);
-    e_out.push(+e_interp.toFixed(4));
+    t_out.push(+(timeArr[lo]        * (1 - w) + timeArr[hi]        * w).toFixed(4));
+    e_out.push(+(normEnergy[lo]     * (1 - w) + normEnergy[hi]     * w).toFixed(4));
+    sc_out.push(+(normCentroid[lo]  * (1 - w) + normCentroid[hi]   * w).toFixed(4));
+    xyz_out.push([
+      +(xyz3d[lo][0] * (1 - w) + xyz3d[hi][0] * w).toFixed(5),
+      +(xyz3d[lo][1] * (1 - w) + xyz3d[hi][1] * w).toFixed(5),
+      +(xyz3d[lo][2] * (1 - w) + xyz3d[hi][2] * w).toFixed(5),
+    ]);
   }
 
   onProgress(1.0);
 
   return {
-    species:    file.name.replace(/\.[^.]+$/, '').replace(/[_\s]+/g, '_'),
-    t:          t_out,
-    xyz:        xyz_out,
-    energy:     e_out,
-    duration_s: +duration_s.toFixed(3),
+    species:           file.name.replace(/\.[^.]+$/, '').replace(/[_\s]+/g, '_'),
+    t:                 t_out,
+    xyz:               xyz_out,
+    energy:            e_out,
+    spectral_centroid: sc_out,  // now included — matches process_birds.py schema
+    duration_s:        +duration_s.toFixed(3),
   };
 }
