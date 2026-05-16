@@ -4,19 +4,22 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { initUpload } from './upload.js';
 import { buildIndex, classify, distToSimilarity } from './knn.js';
 
-// ── Renderers ──────────────────────────────────────
+// ── Renderers ──────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-renderer.setClearColor(0xf4f1eb, 1);
-document.body.appendChild(renderer.domElement);
+renderer.setClearColor(0x000000, 0);           // transparent — CSS bg shows through
+
+// Mount into #canvas-root so layout stays clean
+const canvasRoot = document.getElementById('canvas-root') ?? document.body;
+canvasRoot.appendChild(renderer.domElement);
 
 const css2d = new CSS2DRenderer();
 css2d.setSize(innerWidth, innerHeight);
 css2d.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;z-index:5;';
 document.body.appendChild(css2d.domElement);
 
-// ── Scene / Camera ───────────────────────────────────
+// ── Scene / Camera ────────────────────────────────────────────────────────
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.001, 200);
 camera.position.set(2.4, 1.8, 3.4);
@@ -29,7 +32,7 @@ controls.autoRotateSpeed = 0.25;
 controls.minDistance     = 0.5;
 controls.maxDistance     = 12;
 
-// ── Colour map ──────────────────────────────────────
+// ── Colour map (energy → heat colour) ────────────────────────────────────
 function heatColor(e) {
   const t = Math.max(0, Math.min(1, e));
   const c = new THREE.Color();
@@ -51,7 +54,7 @@ function heatColor(e) {
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// ── Error display ──────────────────────────────────────
+// ── Error display ─────────────────────────────────────────────────────────
 function showError(msg) {
   const el = document.getElementById('error-state');
   if (el) { el.querySelector('.error-msg').textContent = msg; el.style.display = 'flex'; }
@@ -59,67 +62,166 @@ function showError(msg) {
   if (ov) ov.style.display = 'none';
 }
 
-// ── Axes ─────────────────────────────────────────────
-function addAxis(a, b, hex, op = 0.70) {
-  const g = new THREE.BufferGeometry().setFromPoints([a, b]);
-  scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op })));
+// ═══════════════════════════════════════════════════════════════════════════
+//  AESTHETIC OVERHAUL — Axes, Grid, Labels
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Colour palette for axes ───────────────────────────────────────────────
+// Warmer, more muted values that sit comfortably in both light and dark modes
+const AX_R = 0xc0230a;   // PC1 Timbre  — red
+const AX_G = 0x1a7a40;   // PC2 Texture — green
+const AX_B = 0x1a44a8;   // PC3 Spectral — blue
+
+// ── Helper: dashed line via many short segments ───────────────────────────
+// Three.js LineDashedMaterial needs computeLineDistances() and only works
+// on Lines (not LineSegments for instanced use), so we fake dashes manually
+// by emitting alternating filled / skipped segments.
+function dashedLine(from, to, color, opacity, dashLen = 0.08, gapLen = 0.04) {
+  const dir = new THREE.Vector3().subVectors(to, from);
+  const totalLen = dir.length();
+  dir.normalize();
+  const pts = [];
+  let cursor = 0;
+  let drawing = true;
+  while (cursor < totalLen) {
+    const segLen = Math.min(drawing ? dashLen : gapLen, totalLen - cursor);
+    if (drawing) {
+      pts.push(
+        from.clone().addScaledVector(dir, cursor),
+        from.clone().addScaledVector(dir, cursor + segLen)
+      );
+    }
+    cursor  += segLen;
+    drawing  = !drawing;
+  }
+  if (!pts.length) return;
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  scene.add(new THREE.LineSegments(geo, mat));
 }
 
-addAxis(new THREE.Vector3(-1.6,0,0), new THREE.Vector3(1.6,0,0), 0xc0230a, 0.75);
-addAxis(new THREE.Vector3(0,-1.6,0), new THREE.Vector3(0,1.6,0), 0x1a7a40, 0.75);
-addAxis(new THREE.Vector3(0,0,-1.6), new THREE.Vector3(0,0,1.6), 0x1a44a8, 0.75);
-
-const TICK_STEP = 0.4;
-const TICK_HALF = 0.04;
-for (let v = -1.6; v <= 1.6; v += TICK_STEP) {
-  if (Math.abs(v) < 0.01) continue;
-  const xg = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(v, -TICK_HALF, 0), new THREE.Vector3(v, TICK_HALF, 0)
-  ]);
-  scene.add(new THREE.Line(xg, new THREE.LineBasicMaterial({ color: 0xc0230a, transparent: true, opacity: 0.45 })));
-  const yg = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-TICK_HALF, v, 0), new THREE.Vector3(TICK_HALF, v, 0)
-  ]);
-  scene.add(new THREE.Line(yg, new THREE.LineBasicMaterial({ color: 0x1a7a40, transparent: true, opacity: 0.45 })));
-  const zg = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, -TICK_HALF, v), new THREE.Vector3(0, TICK_HALF, v)
-  ]);
-  scene.add(new THREE.Line(zg, new THREE.LineBasicMaterial({ color: 0x1a44a8, transparent: true, opacity: 0.45 })));
+// ── Helper: solid line ────────────────────────────────────────────────────
+function solidLine(from, to, color, opacity) {
+  const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
+  scene.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity })));
 }
 
-function addAxisLabel(text, pos, col) {
-  const el = document.createElement('div');
-  el.textContent = text;
-  el.style.cssText = `color:${col};font-size:8px;letter-spacing:.3em;font-weight:700;text-transform:uppercase;font-family:'Courier New',monospace;opacity:0.75;padding:1px 4px;`;
+// ── Axes ──────────────────────────────────────────────────────────────────
+// Solid centre portion (origin → tip), dashed negative half
+const AXIS_LEN = 1.55;
+
+// Positive halves — solid, fully opaque
+solidLine(new THREE.Vector3(0,0,0), new THREE.Vector3(AXIS_LEN, 0, 0), AX_R, 0.80);
+solidLine(new THREE.Vector3(0,0,0), new THREE.Vector3(0, AXIS_LEN, 0), AX_G, 0.80);
+solidLine(new THREE.Vector3(0,0,0), new THREE.Vector3(0, 0, AXIS_LEN), AX_B, 0.80);
+
+// Negative halves — dashed, dimmed
+dashedLine(new THREE.Vector3(0,0,0), new THREE.Vector3(-AXIS_LEN, 0, 0), AX_R, 0.28);
+dashedLine(new THREE.Vector3(0,0,0), new THREE.Vector3(0, -AXIS_LEN, 0), AX_G, 0.28);
+dashedLine(new THREE.Vector3(0,0,0), new THREE.Vector3(0, 0, -AXIS_LEN), AX_B, 0.28);
+
+// Arrow tips — small cones on the positive ends
+function addArrowTip(pos, dir, color) {
+  const geo = new THREE.ConeGeometry(0.022, 0.072, 8);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.80 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(pos);
+  // Rotate cone (default points +Y) to align with axis direction
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  scene.add(mesh);
+}
+addArrowTip(new THREE.Vector3(AXIS_LEN + 0.036, 0, 0), new THREE.Vector3(1, 0, 0), AX_R);
+addArrowTip(new THREE.Vector3(0, AXIS_LEN + 0.036, 0), new THREE.Vector3(0, 1, 0), AX_G);
+addArrowTip(new THREE.Vector3(0, 0, AXIS_LEN + 0.036), new THREE.Vector3(0, 0, 1), AX_B);
+
+// ── Tick marks ────────────────────────────────────────────────────────────
+// Larger ticks at round values, thinner style
+const TICK_VALS  = [-1.2, -0.8, -0.4, 0.4, 0.8, 1.2];
+const TICK_MAJOR = 0.05;  // half-length of a major tick
+
+for (const v of TICK_VALS) {
+  // X axis
+  solidLine(
+    new THREE.Vector3(v, -TICK_MAJOR, 0),
+    new THREE.Vector3(v,  TICK_MAJOR, 0),
+    AX_R, 0.35
+  );
+  // Y axis
+  solidLine(
+    new THREE.Vector3(-TICK_MAJOR, v, 0),
+    new THREE.Vector3( TICK_MAJOR, v, 0),
+    AX_G, 0.35
+  );
+  // Z axis
+  solidLine(
+    new THREE.Vector3(0, -TICK_MAJOR, v),
+    new THREE.Vector3(0,  TICK_MAJOR, v),
+    AX_B, 0.35
+  );
+}
+
+// ── Axis labels (CSS2D) ───────────────────────────────────────────────────
+// Redesigned: short human-readable name on top, full name below in muted text
+function addAxisLabel(shortName, fullName, pos, hex) {
+  const col = `#${hex.toString(16).padStart(6, '0')}`;
+  const el  = document.createElement('div');
+  el.style.cssText = [
+    'display:flex',
+    'flex-direction:column',
+    'align-items:center',
+    'pointer-events:none',
+    'user-select:none',
+    'line-height:1.25',
+    'text-align:center',
+  ].join(';');
+  el.innerHTML = [
+    `<span style="font-family:'Satoshi',system-ui,sans-serif;font-size:10px;font-weight:700;`,
+    `letter-spacing:0.03em;color:${col};opacity:0.92;white-space:nowrap">${shortName}</span>`,
+    `<span style="font-family:'Satoshi',system-ui,sans-serif;font-size:8px;font-weight:500;`,
+    `letter-spacing:0.12em;text-transform:uppercase;color:${col};opacity:0.45;white-space:nowrap">${fullName}</span>`,
+  ].join('');
   const obj = new CSS2DObject(el);
   obj.position.copy(pos);
   scene.add(obj);
 }
-addAxisLabel('PC1 · Timbre',   new THREE.Vector3(1.68, 0.06, 0),  '#c0230a');
-addAxisLabel('PC2 · Texture',  new THREE.Vector3(0.06, 1.68, 0),  '#1a7a40');
-addAxisLabel('PC3 · Spectral', new THREE.Vector3(0.06, 0,   1.68),'#1a44a8');
 
-const GRID_STEPS = 8;
-const GRID_RANGE = 1.6;
-const gridMat = new THREE.LineBasicMaterial({ color: 0x9e9880, transparent: true, opacity: 0.13 });
+addAxisLabel('Timbre',   'PC1', new THREE.Vector3(AXIS_LEN + 0.18, 0.04, 0),  AX_R);
+addAxisLabel('Texture',  'PC2', new THREE.Vector3(0.04, AXIS_LEN + 0.18, 0),  AX_G);
+addAxisLabel('Spectral', 'PC3', new THREE.Vector3(0.04, 0, AXIS_LEN + 0.18),  AX_B);
+
+// ── Grid (XZ plane only — subtle, single plane) ──────────────────────────
+// One clean XZ ground plane grid, tighter opacity, fewer lines
+const GRID_STEPS = 6;
+const GRID_RANGE = 1.4;
+const gridMat = new THREE.LineBasicMaterial({ color: 0xb8b090, transparent: true, opacity: 0.09 });
 for (let i = 0; i <= GRID_STEPS; i++) {
   const f = -GRID_RANGE + (2 * GRID_RANGE / GRID_STEPS) * i;
   const gx = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(f, 0, -GRID_RANGE), new THREE.Vector3(f, 0, GRID_RANGE)
+    new THREE.Vector3(f, 0, -GRID_RANGE),
+    new THREE.Vector3(f, 0,  GRID_RANGE),
   ]);
   scene.add(new THREE.Line(gx, gridMat));
   const gz = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-GRID_RANGE, 0, f), new THREE.Vector3(GRID_RANGE, 0, f)
+    new THREE.Vector3(-GRID_RANGE, 0, f),
+    new THREE.Vector3( GRID_RANGE, 0, f),
   ]);
   scene.add(new THREE.Line(gz, gridMat));
 }
 
-// ── Slot ─────────────────────────────────────────────
+// ── Origin marker ─────────────────────────────────────────────────────────
+// Small sphere at 0,0,0 so the convergence of axes is clear
+const originGeo = new THREE.SphereGeometry(0.018, 12, 12);
+const originMat = new THREE.MeshBasicMaterial({ color: 0x999070, transparent: true, opacity: 0.55 });
+scene.add(new THREE.Mesh(originGeo, originMat));
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SLOT SYSTEM (unchanged logic, aesthetic tweaks only)
+// ═══════════════════════════════════════════════════════════════════════════
+
 const NODE_COUNT = 80;
 const KNN_EDGES  = 3;
 const TRAIL_HOPS = 20;
 
-// ── Edge memoization — skip rebuild if same nodePos buffer ──
 const _edgeCache = new WeakMap();
 function buildEdgesMemo(nodePos, N, k) {
   if (_edgeCache.has(nodePos)) return _edgeCache.get(nodePos);
@@ -155,11 +257,9 @@ function makeSlot() {
     trailGeo: null, trailPos: null, trailCol: null,
     halo: null, haloMat: null,
     objects: [], labelObjects: [],
-    // ── smoothed float index (never snapped to int mid-frame) ──
     smoothIdx: 0,
     prevClockTime: -1,
     prevAni: -1,
-    // ── smoothed halo/scale values to avoid per-frame pop ──
     smoothScale: 1.0,
     smoothHaloOpacity: 0.0,
     smoothEnergy: 0.0,
@@ -169,7 +269,9 @@ function makeSlot() {
 const primary   = makeSlot();
 const secondary = makeSlot();
 
-const NODE_GEO = new THREE.BoxGeometry(0.016, 0.016, 0.016);
+// ── Node geometry: rounded sphere instead of cube ─────────────────────────
+// Spheres read more naturally as "data points" than cubes
+const NODE_GEO = new THREE.SphereGeometry(0.012, 8, 8);
 const HALO_GEO = new THREE.SphereGeometry(0.034, 16, 16);
 
 function disposeSlot(slot) {
@@ -277,7 +379,6 @@ function buildSlot(slot, manifold) {
   slot.edgeGeo.attributes.position.needsUpdate = true;
   slot.edgeGeo.attributes.color.needsUpdate    = true;
 
-  // opacity: 0 — edge graph hidden, trail is the sole path indicator
   const edgeLine = new THREE.LineSegments(slot.edgeGeo,
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0 }));
   scene.add(edgeLine);
@@ -303,27 +404,54 @@ function buildSlot(slot, manifold) {
   slot.cloud = cloud;
   slot.objects.push(cloud);
 
-  const LABEL_EVERY = 8;
+  // ── Node labels: redesigned ───────────────────────────────────────────
+  // Show every 10th node (less clutter), human-readable format:
+  //   Energy value as a short percentage bar (▪▪▪▪▪░░░░░) + energy %
+  //   Spectral centroid as "X.Xk Hz"
+  const LABEL_EVERY = 10;
   for (let i = 0; i < N; i += LABEL_EVERY) {
     const e  = nodeE[i];
     const sc = nodeSC[i];
+
+    // Progress bar: 5 filled + 5 empty blocks representing 0–100% energy
+    const filled = Math.round(e * 5);
+    const bar = '▪'.repeat(filled) + '░'.repeat(5 - filled);
+    const energyPct = Math.round(e * 100);
+
     const el = document.createElement('div');
     el.className = 'node-label';
-    el.innerHTML =
-      `<span class="nl-e">${e.toFixed(4)}</span>` +
-      `<span class="nl-sc">${sc > 0 ? (sc / 1000).toFixed(2) + 'k' : ''}</span>`;
+
+    // Energy line: bar + percentage
+    const eLine = document.createElement('span');
+    eLine.className = 'nl-e';
+    // Colour shifts with energy: low=blue tint, high=amber tint
+    const r = Math.round(40  + e * 180);
+    const g = Math.round(40  + e * 80);
+    const b = Math.round(160 - e * 140);
+    eLine.style.color = `rgb(${r},${g},${b})`;
+    eLine.textContent = `${bar} ${energyPct}%`;
+
+    // Spectral centroid line (only if present)
+    const scLine = document.createElement('span');
+    scLine.className = 'nl-sc';
+    if (sc > 0) scLine.textContent = `${(sc / 1000).toFixed(1)}k Hz`;
+
+    el.appendChild(eLine);
+    if (sc > 0) el.appendChild(scLine);
+
     const css = new CSS2DObject(el);
-    css.position.set(nodePos[i*3], nodePos[i*3+1] + 0.025, nodePos[i*3+2]);
+    css.position.set(nodePos[i*3], nodePos[i*3+1] + 0.028, nodePos[i*3+2]);
     scene.add(css);
     slot.labels.push({ css, el, nodeIdx: i });
     slot.labelObjects.push(css);
   }
 
-  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0x1a1710, transparent: true, opacity: 0, wireframe: true });
+  slot.haloMat = new THREE.MeshBasicMaterial({ color: 0xddccaa, transparent: true, opacity: 0, wireframe: true });
   slot.halo    = new THREE.Mesh(HALO_GEO, slot.haloMat);
   scene.add(slot.halo);
   slot.objects.push(slot.halo);
 
+  // ── Trail geometry ────────────────────────────────────────────────────
   const trailPts = TRAIL_HOPS * 2;
   slot.trailPos  = new Float32Array(trailPts * 3);
   slot.trailCol  = new Float32Array(trailPts * 3);
@@ -345,15 +473,12 @@ function buildSlot(slot, manifold) {
   slot.prevAni = -1;
 }
 
-// ── Clock ─────────────────────────────────────────────
+// ── Clock ─────────────────────────────────────────────────────────────────
 let clockTime = 0;
-// FIX 1: Use a stable high-res reference timestamp instead of raw delta
-// Raw `ts - lastRAF` produces massive spikes on the first frame after a tab
-// becomes visible again (e.g. 500ms+ stutter). Clamp to 1 frame max (1/60s).
 let lastRAF   = null;
 let playing   = false;
 
-const MAX_DELTA = 1 / 30; // never advance more than 2 frames worth at once
+const MAX_DELTA = 1 / 30;
 
 function currentTime(slot) {
   if (slot.audioReady && slot.audio && !slot.audio.paused) return slot.audio.currentTime;
@@ -378,18 +503,11 @@ function fracNodeForTime(slot, ct) {
   return clamp(rawIdx / nodeStep, 0, NODE_COUNT - 1);
 }
 
-// ── Per-frame update ────────────────────────────────────
+// ── Per-frame update ──────────────────────────────────────────────────────
 const _d = new THREE.Object3D();
 const _c = new THREE.Color();
 
-// FIX 2: Lerp constant — use a frame-rate independent exponential decay.
-// The old code used `1.0 - Math.pow(0.04, delta)` which is correct in principle
-// but the smoothIdx was then immediately snapped via Math.round(), destroying
-// all the interpolation. We now keep smoothIdx as a true float and only snap
-// to int for the GPU colour/scale writes — this gives sub-node interpolation
-// for the halo position, making it glide rather than pop between nodes.
 function lerpFactor(halfLifeSeconds, delta) {
-  // Returns alpha such that the gap halves every halfLifeSeconds
   return 1.0 - Math.pow(0.5, delta / halfLifeSeconds);
 }
 
@@ -401,23 +519,15 @@ function tickSlot(slot, delta) {
 
   const target = fracNodeForTime(slot, ct);
 
-  // FIX 2a: Use a fixed half-life of 40ms (smooth but responsive at 60fps).
-  // The old power(0.04, delta) is equivalent to ~half-life of 7ms which is
-  // so fast it barely smooths, causing the snap-to-round to create visible pops.
   const alpha = lerpFactor(0.040, delta);
   const prev  = slot.smoothIdx;
 
-  // Prevent wrap-around glitch: if target jumped backward by >40% of nodes,
-  // teleport smoothIdx to 0 to match the loop restart.
   if ((target - prev) < -(NODE_COUNT * 0.4)) {
     slot.smoothIdx = target;
   } else {
     slot.smoothIdx = prev + alpha * (target - prev);
   }
 
-  // FIX 3: Keep the continuous float for halo position, only round for node
-  // highlighting. This means the halo glides smoothly between nodes instead
-  // of snapping to the nearest integer every frame.
   const fracIdx = slot.smoothIdx;
   const ani     = clamp(Math.round(fracIdx), 0, N - 1);
 
@@ -426,8 +536,6 @@ function tickSlot(slot, delta) {
 
   const ae = nodeEnergy[ani];
 
-  // FIX 4: Smooth the active-node energy value itself so brightness/scale
-  // don't pop when crossing a high-energy node. Use same half-life.
   slot.smoothEnergy = slot.smoothEnergy + lerpFactor(0.060, delta) * (ae - slot.smoothEnergy);
   const se = slot.smoothEnergy;
 
@@ -442,7 +550,6 @@ function tickSlot(slot, delta) {
       const e  = nodeEnergy[i];
       const isActive    = i === ani;
       const isNeighbour = neighbours.has(i);
-      // Use smoothed energy (se) for the active node to prevent scale pop
       const bright = isActive    ? 1.6 + se * 0.8
                    : isNeighbour ? 1.1 + e  * 0.5
                    :               0.90 + e * 0.15;
@@ -459,7 +566,6 @@ function tickSlot(slot, delta) {
     slot.cloud.instanceMatrix.needsUpdate = true;
     slot.cloud.instanceColor.needsUpdate  = true;
 
-    // edge colours
     const { edgeCol, edgeGeo } = slot;
     for (let ei = 0; ei < edges.length; ei++) {
       const [i, j]   = edges[ei];
@@ -475,20 +581,16 @@ function tickSlot(slot, delta) {
     }
     edgeGeo.attributes.color.needsUpdate = true;
 
-    // labels
+    // Labels: show only labels near active node, fade others
     for (const { el, nodeIdx } of slot.labels) {
       const dist   = Math.abs(nodeIdx - ani) / N;
-      const active = dist < 0.06;
-      el.style.opacity = active ? '1.0' : '0.32';
-      const hc = heatColor(nodeEnergy[nodeIdx]);
-      el.style.color = active
-        ? `rgb(${Math.round(hc.r*180)},${Math.round(hc.g*80)},${Math.round(hc.b*20)})`
-        : '#6a6050';
+      const active = dist < 0.08;   // slightly wider window than before
+      el.style.opacity = active ? '1.0' : '0.18';  // others nearly invisible
+      el.style.transform = active ? 'scale(1.08)' : 'scale(1)';
     }
   }
 
-  // FIX 3 (continued): Halo position uses continuous fracIdx for sub-node
-  // interpolation. Lerp between the two surrounding node positions.
+  // Smooth halo position (continuous sub-node interpolation)
   const loNode = Math.floor(fracIdx);
   const hiNode = Math.min(loNode + 1, N - 1);
   const t      = fracIdx - loNode;
@@ -497,15 +599,14 @@ function tickSlot(slot, delta) {
   const hz = nodes[loNode*3+2] + t * (nodes[hiNode*3+2] - nodes[loNode*3+2]);
   slot.halo.position.set(hx, hy, hz);
 
-  // FIX 4 (continued): Smooth halo scale and opacity to prevent brightness pop.
-  const targetScale = 1.0 + se * 1.4;
+  const targetScale   = 1.0 + se * 1.4;
   const targetOpacity = 0.28 + se * 0.42;
-  slot.smoothScale         = slot.smoothScale + lerpFactor(0.050, delta) * (targetScale - slot.smoothScale);
-  slot.smoothHaloOpacity   = slot.smoothHaloOpacity + lerpFactor(0.050, delta) * (targetOpacity - slot.smoothHaloOpacity);
+  slot.smoothScale       = slot.smoothScale       + lerpFactor(0.050, delta) * (targetScale   - slot.smoothScale);
+  slot.smoothHaloOpacity = slot.smoothHaloOpacity + lerpFactor(0.050, delta) * (targetOpacity - slot.smoothHaloOpacity);
   slot.halo.scale.setScalar(slot.smoothScale);
   slot.haloMat.opacity = slot.smoothHaloOpacity;
 
-  // trail always updates
+  // ── Trail: wider line feel via brighter colour gradient ───────────────
   if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
   if (slot.trail.length > TRAIL_HOPS + 1) slot.trail.shift();
 
@@ -515,11 +616,13 @@ function tickSlot(slot, delta) {
   for (let s = 0; s < segs; s++) {
     const a  = slot.trail[s], b = slot.trail[s + 1];
     const ea = nodeEnergy[a], eb = nodeEnergy[b];
-    const f  = (s + 1) / segs;
-    const bright = Math.pow(f, 0.8) * 2.2;
+    const f  = (s + 1) / segs;        // 0 = oldest, 1 = newest
+    // Newer segments much brighter; older fade to near-zero
+    const bright = Math.pow(f, 0.6) * 2.6;
+    const alpha  = Math.pow(f, 1.2);  // additional fade encoded in colour brightness
     trailPos[s*6+0] = nodes[a*3];   trailPos[s*6+1] = nodes[a*3+1]; trailPos[s*6+2] = nodes[a*3+2];
     trailPos[s*6+3] = nodes[b*3];   trailPos[s*6+4] = nodes[b*3+1]; trailPos[s*6+5] = nodes[b*3+2];
-    _c.copy(heatColor(ea)).multiplyScalar(bright * (1 - f * 0.3));
+    _c.copy(heatColor(ea)).multiplyScalar(bright * alpha);
     trailCol[s*6+0] = _c.r; trailCol[s*6+1] = _c.g; trailCol[s*6+2] = _c.b;
     _c.copy(heatColor(eb)).multiplyScalar(bright);
     trailCol[s*6+3] = _c.r; trailCol[s*6+4] = _c.g; trailCol[s*6+5] = _c.b;
@@ -529,7 +632,7 @@ function tickSlot(slot, delta) {
   trailGeo.attributes.color.needsUpdate    = true;
 }
 
-// ── Audio helpers ──────────────────────────────────────
+// ── Audio helpers ─────────────────────────────────────────────────────────
 function loadAudioForSlot(slot, key) {
   if (slot.audio) { slot.audio.pause(); slot.audio.src = ''; }
   slot.audioReady = false;
@@ -550,7 +653,7 @@ function loadAudioForSlot(slot, key) {
   tryNext();
 }
 
-// ── Load data ──────────────────────────────────────────
+// ── Load data ─────────────────────────────────────────────────────────────
 let allData = null;
 try {
   const res = await fetch('./birdsong_data.json');
@@ -574,24 +677,28 @@ if (!speciesKeys.length) {
 
 const knnIndex = buildIndex(speciesMap);
 
-// ── Dropdown ───────────────────────────────────────────
+// ── Dropdown ──────────────────────────────────────────────────────────────
 const select = document.getElementById('speciesSelect');
 select.innerHTML = '';
 for (const key of speciesKeys) {
-  const opt = document.createElement('option'); opt.value = key;
-  opt.textContent = key.replace(/_/g, ' '); select.appendChild(opt);
+  const opt = document.createElement('option');
+  opt.value = key;
+  opt.textContent = key.replace(/_/g, ' ');
+  select.appendChild(opt);
 }
 
 function setTitleLabels(name) {
-  const p = name.replace(/_/g,' ').toUpperCase();
-  document.getElementById('titleSpecies').textContent = p;
-  document.getElementById('label').textContent = p + ' · Spatiotemporal Acoustic Manifold';
+  const p = name.replace(/_/g, ' ');
+  const titleEl = document.getElementById('titleSpecies');
+  if (titleEl) titleEl.textContent = p;
+  document.title = `${p} · Birdsong Acoustic Manifold`;
 }
 
 function updateManifoldLegend() {
   const el = document.getElementById('manifold-legend');
   el.classList.toggle('visible', !!secondary.manifold);
-  document.getElementById('legend-primary').textContent = select.value.replace(/_/g,' ');
+  const lp = document.getElementById('legend-primary');
+  if (lp) lp.textContent = select.value.replace(/_/g, ' ');
 }
 
 function showKnnResults(results) {
@@ -632,20 +739,17 @@ select.addEventListener('change', () => {
   loadSpecies(select.value);
 });
 
-// ── Overlay / Pause ────────────────────────────────────
+// ── Overlay / Pause ───────────────────────────────────────────────────────
 const overlay   = document.getElementById('overlay');
 const playBtn   = document.getElementById('playBtn');
-const modeBadge = document.getElementById('mode-badge');
 
 playBtn.style.display = 'block';
-playBtn.textContent = 'Play';
+playBtn.textContent   = 'Play';
 
 function startPlayback() {
   playing = true;
   playBtn.textContent = 'Pause';
-  // FIX 1: Reset lastRAF so the first delta after resuming is 0, not a
-  // multi-second spike. Without this, tab-switching or pausing causes a single
-  // enormous delta that catapults smoothIdx across the manifold visibly.
+  playBtn.classList.add('playing');
   lastRAF = null;
   primary.audio?.play().catch(() => {});
   if (secondary.audio) secondary.audio.play().catch(() => {});
@@ -654,6 +758,7 @@ function startPlayback() {
 function pausePlayback() {
   playing = false;
   playBtn.textContent = 'Play';
+  playBtn.classList.remove('playing');
   lastRAF = null;
   primary.audio?.pause();
   secondary.audio?.pause();
@@ -671,12 +776,16 @@ overlay.addEventListener('click', () => {
   startPlayback();
 }, { once: true });
 
+overlay.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') overlay.click();
+});
+
 playBtn.addEventListener('click', e => {
   e.stopPropagation();
   if (playing) pausePlayback(); else startPlayback();
 });
 
-// ── Upload ──────────────────────────────────────────────
+// ── Upload ────────────────────────────────────────────────────────────────
 initUpload({
   onManifold(m, file) {
     buildSlot(secondary, m);
@@ -688,8 +797,10 @@ initUpload({
       secondary.audioReady = true;
       if (playing) audio.play().catch(() => {});
     }, { once: true });
-    if (modeBadge) modeBadge.textContent = m.species.replace(/_/g,' ').toUpperCase();
-    document.getElementById('legend-secondary').textContent = m.species.replace(/_/g,' ');
+    const mb = document.getElementById('mode-badge');
+    if (mb) mb.textContent = m.species.replace(/_/g, ' ');
+    const ls = document.getElementById('legend-secondary');
+    if (ls) ls.textContent = m.species.replace(/_/g, ' ');
     updateManifoldLegend();
     showKnnResults(classify(m, knnIndex, 3));
   },
@@ -701,12 +812,14 @@ initUpload({
   },
   onProgress(pct) {
     const bar = document.getElementById('upload-progress-bar');
+    const bg  = document.getElementById('upload-progress-bg');
     if (bar) { bar.style.opacity = '1'; bar.style.width = pct + '%'; }
+    if (bg)  bg.setAttribute('aria-valuenow', pct);
     if (pct >= 100) setTimeout(() => { if (bar) bar.style.opacity = '0'; }, 800);
   },
 });
 
-// ── Animation loop ─────────────────────────────────────
+// ── Animation loop ────────────────────────────────────────────────────────
 function animate(ts) {
   requestAnimationFrame(animate);
   controls.update();
@@ -714,8 +827,6 @@ function animate(ts) {
   if (playing) {
     let delta = 0;
     if (lastRAF !== null) {
-      // FIX 1: Clamp delta to MAX_DELTA to absorb tab-switch spikes and
-      // browser throttling. A 500ms spike becomes at most 33ms of advancement.
       delta = Math.min((ts - lastRAF) / 1000, MAX_DELTA);
       clockTime += delta;
     }
