@@ -1,6 +1,6 @@
 """
 api/llm.py
-LLM integration using Google Gemini Flash (free tier).
+LLM integration using Google Gemini Flash Lite (free tier).
 
 Three capabilities:
   1. describe(species, matches)        — generate a rich species description
@@ -24,7 +24,7 @@ import httpx
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent"
+    "gemini-2.0-flash-lite:generateContent"
 )
 
 
@@ -33,7 +33,7 @@ def _available() -> bool:
 
 
 async def _call(prompt: str, temperature: float = 0.7) -> str:
-    """Single-turn call to Gemini Flash. Returns the text response."""
+    """Single-turn call to Gemini Flash Lite. Returns the text response."""
     if not _available():
         raise RuntimeError("GEMINI_API_KEY not set")
 
