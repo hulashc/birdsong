@@ -1,0 +1,17 @@
+[tool.pytest.ini_options]
+# Makes `pytest` discoverable from the repo root without needing PYTHONPATH
+pythonpath = ["."]  # adds repo root to sys.path so `import api` works
+testpaths = ["api/tests"]
+
+[tool.uvicorn]
+# Not used directly, but documents the intended startup command
+app = "api.main:app"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "birdsong"
+version = "2.0.0"
+requires-python = ">=3.10"

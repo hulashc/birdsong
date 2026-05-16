@@ -6,13 +6,12 @@ services:
     name: birdsong-api
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    # PYTHONPATH=. ensures `import api` resolves from repo root on Render
+    startCommand: PYTHONPATH=. uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: BIRDSONG_DATA_PATH
         value: birdsong_data.json
       - key: PYTHON_VERSION
         value: "3.11"
     healthCheckPath: /health
-    # Free-tier keep-alive: hit /health every 14 minutes
-    # Add a cron job in Render dashboard pointing to /health
     autoDeploy: true
