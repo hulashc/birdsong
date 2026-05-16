@@ -24,10 +24,10 @@ from typing import Any
 import httpx
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-# gemini-1.5-flash-8b: 1000 RPM on free tier — far more headroom than 2.0-flash (15 RPM)
+# gemini-1.5-flash: widely available, 15 RPM / 1500 RPD free tier
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash-8b:generateContent"
+    "gemini-1.5-flash:generateContent"
 )
 
 _MAX_RETRIES = 3
@@ -59,8 +59,6 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
         },
     }
 
-    last_error: Exception | None = None
-
     for attempt in range(_MAX_RETRIES):
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -72,9 +70,6 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
                 if resp.status_code == 429:
                     wait = _RETRY_DELAY * (attempt + 1)
                     await asyncio.sleep(wait)
-                    last_error = RuntimeError(
-                        f"Rate limited (attempt {attempt + 1}/{_MAX_RETRIES})"
-                    )
                     continue
                 resp.raise_for_status()
                 data = resp.json()
@@ -84,7 +79,6 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
             sanitised = _sanitise_error(str(exc))
             if exc.response.status_code != 429:
                 raise RuntimeError(sanitised) from exc
-            last_error = RuntimeError(sanitised)
         except Exception as exc:
             raise RuntimeError(_sanitise_error(str(exc))) from exc
 
