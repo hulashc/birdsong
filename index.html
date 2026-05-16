@@ -120,7 +120,7 @@
     #playBtn:hover { background: var(--bg); border-color: var(--text-muted); }
     #playBtn.playing { background: var(--text-col); color: var(--bg); border-color: var(--text-col); }
 
-    /* SIDE PANEL */
+    /* SIDE PANEL — desktop */
     #side-panel {
       position: fixed; bottom: 14px; left: 14px;
       z-index: 10; width: 252px;
@@ -197,12 +197,53 @@
     .error-icon { font-size: 28px; opacity: 0.3; }
     .error-msg { font-size: var(--text-base); font-weight: 700; letter-spacing: 0.08em; color: var(--clr-r); max-width: 38ch; text-align: center; line-height: 1.8; }
     .error-hint { font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-faint); }
+
+    /* ── MOBILE BOTTOM-SHEET ── */
+    /* Drawer handle shown at all times on mobile */
+    #sheet-handle { display: none; }
+
     @media (max-width: 700px) {
       #topbar { top: 8px; left: 8px; right: 8px; height: 48px; }
       .tb-badge { display: none; }
-      #side-panel { left: 8px; right: 8px; width: auto; bottom: 8px; }
       #legend { display: none; }
+
+      /* Sheet sits at the very bottom, peeking 56px above the fold */
+      #side-panel {
+        left: 0; right: 0; bottom: 0;
+        width: 100%;
+        border-radius: var(--r-lg) var(--r-lg) 0 0;
+        border-left: none; border-right: none; border-bottom: none;
+        max-height: 80dvh;
+        overflow-y: auto;
+        /* collapsed: only the handle (48px) + species row (~56px) peeks out */
+        transform: translateY(calc(100% - 56px));
+        transition: transform 0.35s var(--ease-out);
+        /* ensure canvas is still fully visible behind */
+        box-shadow: 0 -8px 32px rgba(20,16,10,0.14);
+      }
+      #side-panel.sheet-open {
+        transform: translateY(0);
+      }
+
+      /* Handle pill at the top of the drawer */
+      #sheet-handle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 36px;
+        flex-shrink: 0;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #sheet-handle::before {
+        content: '';
+        width: 36px; height: 4px;
+        background: var(--border);
+        border-radius: var(--r-full);
+      }
     }
+
     @media (max-width: 420px) { .tb-brand-name { display: none; } }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
@@ -251,6 +292,9 @@
   </header>
 
   <aside id="side-panel" aria-label="Controls">
+
+    <!-- Mobile drag handle -->
+    <div id="sheet-handle" role="button" aria-label="Toggle controls panel" tabindex="0"></div>
 
     <div class="panel-header">
       <div class="sec-label">Species</div>
@@ -369,6 +413,33 @@
     })();
   </script>
 
+  <!-- MOBILE SHEET TOGGLE -->
+  <script>
+    (() => {
+      const panel  = document.getElementById('side-panel');
+      const handle = document.getElementById('sheet-handle');
+      const MOBILE = () => window.innerWidth <= 700;
+
+      function toggle() {
+        if (!MOBILE()) return;
+        panel.classList.toggle('sheet-open');
+      }
+
+      handle.addEventListener('click', toggle);
+      handle.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+
+      // Close sheet when tapping the canvas on mobile
+      document.getElementById('canvas-root').addEventListener('click', () => {
+        if (MOBILE()) panel.classList.remove('sheet-open');
+      });
+
+      // Reset on resize
+      window.addEventListener('resize', () => {
+        if (!MOBILE()) panel.classList.remove('sheet-open');
+      });
+    })();
+  </script>
+
   <!-- LLM CHAT HANDLER -->
   <script>
     (() => {
@@ -379,7 +450,6 @@
       const thread   = document.getElementById('llmThread');
       const clearBtn = document.getElementById('llmClear');
 
-      // history stores {role, content} turns — matches backend ChatMessage schema exactly
       let history = [];
 
       document.getElementById('speciesSelect')?.addEventListener('change', () => {
@@ -411,11 +481,7 @@
         const question = input.value.trim();
         if (!question) return;
 
-        // Append the new user turn to history, then POST the full history array.
-        // The backend schema is: { "history": [{"role": "user"|"assistant", "content": "..."}] }
-        // The latest user message is always the last item.
         history.push({ role: 'user', content: question });
-
         appendMsg('user', question);
         input.value = '';
         clearBtn.style.display = 'block';
@@ -427,7 +493,7 @@
           const res = await fetch(LLM_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ history })   // ← exact schema the backend expects
+            body: JSON.stringify({ history })
           });
 
           if (!res.ok) {
@@ -436,17 +502,12 @@
           }
 
           const data = await res.json();
-          // Backend returns { "role": "assistant", "content": "..." }
           const answer = data.content ?? data.response ?? data.answer ?? JSON.stringify(data);
-
-          // Persist assistant turn in history so next message has full context
           history.push({ role: 'assistant', content: answer });
-
           thinkingEl.remove();
           appendMsg('assistant', answer);
 
         } catch (err) {
-          // Remove the user turn we optimistically added if request failed
           history.pop();
           thinkingEl.remove();
           appendMsg('assistant', '⚠ ' + (err?.message || String(err)));
