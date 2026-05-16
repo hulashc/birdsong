@@ -1,10 +1,15 @@
-# Python dependencies for process_birds.py
-# Install with: pip install -r requirements.txt
+# ── Core audio / ML (pipeline & process_birds.py) ──────────────────────────
+numpy==1.26.4
+librosa==0.10.2
+scikit-learn==1.4.2
+soundfile==0.12.1
+numba==0.59.1
 
-numpy>=1.24
-librosa>=0.10
-scikit-learn>=1.3
+# ── FastAPI backend ─────────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9   # required for UploadFile
+httpx==0.27.0             # for TestClient in pytest
 
-# librosa pulls these in automatically, but pinned here for reproducibility
-soundfile>=0.12
-numba>=0.57
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.2.0
