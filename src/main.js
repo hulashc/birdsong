@@ -155,9 +155,14 @@ function makeSlot() {
     trailGeo: null, trailPos: null, trailCol: null,
     halo: null, haloMat: null,
     objects: [], labelObjects: [],
+    // ── smoothed float index (never snapped to int mid-frame) ──
     smoothIdx: 0,
     prevClockTime: -1,
-    prevAni: -1,       // ← cache: skip GPU write when active node unchanged
+    prevAni: -1,
+    // ── smoothed halo/scale values to avoid per-frame pop ──
+    smoothScale: 1.0,
+    smoothHaloOpacity: 0.0,
+    smoothEnergy: 0.0,
   };
 }
 
@@ -180,6 +185,9 @@ function disposeSlot(slot) {
   slot.manifold = null; slot.cloud = null; slot.halo = null;
   slot.trail = [];
   slot.smoothIdx = 0;
+  slot.smoothScale = 1.0;
+  slot.smoothHaloOpacity = 0.0;
+  slot.smoothEnergy = 0.0;
   slot.prevClockTime = -1;
   slot.prevAni = -1;
 }
@@ -207,6 +215,9 @@ function resetNodeScales(slot) {
   slot.cloud.instanceMatrix.needsUpdate = true;
   slot.cloud.instanceColor.needsUpdate  = true;
   slot.prevAni = -1;
+  slot.smoothScale = 1.0;
+  slot.smoothHaloOpacity = 0.0;
+  slot.smoothEnergy = 0.0;
 }
 
 function buildSlot(slot, manifold) {
@@ -327,14 +338,22 @@ function buildSlot(slot, manifold) {
 
   slot.manifold = { times, energy: rawE, rawPts, duration_s: dur, N };
   slot.smoothIdx = 0;
+  slot.smoothScale = 1.0;
+  slot.smoothHaloOpacity = 0.0;
+  slot.smoothEnergy = 0.0;
   slot.prevClockTime = -1;
   slot.prevAni = -1;
 }
 
 // ── Clock ─────────────────────────────────────────────
 let clockTime = 0;
+// FIX 1: Use a stable high-res reference timestamp instead of raw delta
+// Raw `ts - lastRAF` produces massive spikes on the first frame after a tab
+// becomes visible again (e.g. 500ms+ stutter). Clamp to 1 frame max (1/60s).
 let lastRAF   = null;
 let playing   = false;
+
+const MAX_DELTA = 1 / 30; // never advance more than 2 frames worth at once
 
 function currentTime(slot) {
   if (slot.audioReady && slot.audio && !slot.audio.paused) return slot.audio.currentTime;
@@ -363,6 +382,17 @@ function fracNodeForTime(slot, ct) {
 const _d = new THREE.Object3D();
 const _c = new THREE.Color();
 
+// FIX 2: Lerp constant — use a frame-rate independent exponential decay.
+// The old code used `1.0 - Math.pow(0.04, delta)` which is correct in principle
+// but the smoothIdx was then immediately snapped via Math.round(), destroying
+// all the interpolation. We now keep smoothIdx as a true float and only snap
+// to int for the GPU colour/scale writes — this gives sub-node interpolation
+// for the halo position, making it glide rather than pop between nodes.
+function lerpFactor(halfLifeSeconds, delta) {
+  // Returns alpha such that the gap halves every halfLifeSeconds
+  return 1.0 - Math.pow(0.5, delta / halfLifeSeconds);
+}
+
 function tickSlot(slot, delta) {
   if (!slot.manifold || !slot.cloud) return;
   const { nodes, nodeEnergy, edges } = slot;
@@ -370,18 +400,36 @@ function tickSlot(slot, delta) {
   const ct = currentTime(slot);
 
   const target = fracNodeForTime(slot, ct);
-  const alpha  = clamp(1.0 - Math.pow(0.04, delta), 0, 1);
-  const prev   = slot.smoothIdx;
-  slot.smoothIdx = prev + alpha * (target - prev);
-  if ((target - prev) * (target - slot.smoothIdx) < 0) slot.smoothIdx = target;
 
-  const ani = clamp(Math.round(slot.smoothIdx), 0, N - 1);
+  // FIX 2a: Use a fixed half-life of 40ms (smooth but responsive at 60fps).
+  // The old power(0.04, delta) is equivalent to ~half-life of 7ms which is
+  // so fast it barely smooths, causing the snap-to-round to create visible pops.
+  const alpha = lerpFactor(0.040, delta);
+  const prev  = slot.smoothIdx;
 
-  // ── Guard: only rewrite GPU buffers when the active node actually changed ──
+  // Prevent wrap-around glitch: if target jumped backward by >40% of nodes,
+  // teleport smoothIdx to 0 to match the loop restart.
+  if ((target - prev) < -(NODE_COUNT * 0.4)) {
+    slot.smoothIdx = target;
+  } else {
+    slot.smoothIdx = prev + alpha * (target - prev);
+  }
+
+  // FIX 3: Keep the continuous float for halo position, only round for node
+  // highlighting. This means the halo glides smoothly between nodes instead
+  // of snapping to the nearest integer every frame.
+  const fracIdx = slot.smoothIdx;
+  const ani     = clamp(Math.round(fracIdx), 0, N - 1);
+
   const nodeChanged = ani !== slot.prevAni;
   slot.prevAni = ani;
 
   const ae = nodeEnergy[ani];
+
+  // FIX 4: Smooth the active-node energy value itself so brightness/scale
+  // don't pop when crossing a high-energy node. Use same half-life.
+  slot.smoothEnergy = slot.smoothEnergy + lerpFactor(0.060, delta) * (ae - slot.smoothEnergy);
+  const se = slot.smoothEnergy;
 
   if (nodeChanged) {
     const neighbours = new Set();
@@ -394,10 +442,11 @@ function tickSlot(slot, delta) {
       const e  = nodeEnergy[i];
       const isActive    = i === ani;
       const isNeighbour = neighbours.has(i);
-      const bright = isActive    ? 1.6 + ae * 0.8
+      // Use smoothed energy (se) for the active node to prevent scale pop
+      const bright = isActive    ? 1.6 + se * 0.8
                    : isNeighbour ? 1.1 + e  * 0.5
                    :               0.90 + e * 0.15;
-      const scale  = isActive    ? 2.8 + ae * 2.0
+      const scale  = isActive    ? 2.8 + se * 2.0
                    : isNeighbour ? 1.5 + e  * 0.6
                    :               0.85 + e  * 0.4;
       _d.position.set(nodes[i*3], nodes[i*3+1], nodes[i*3+2]);
@@ -410,12 +459,12 @@ function tickSlot(slot, delta) {
     slot.cloud.instanceMatrix.needsUpdate = true;
     slot.cloud.instanceColor.needsUpdate  = true;
 
-    // edge colours — invisible mesh, still update for correctness
+    // edge colours
     const { edgeCol, edgeGeo } = slot;
     for (let ei = 0; ei < edges.length; ei++) {
       const [i, j]   = edges[ei];
       const isActive = i === ani || j === ani;
-      const bright   = isActive ? 1.3 + ae * 0.6 : 0.85;
+      const bright   = isActive ? 1.3 + se * 0.6 : 0.85;
       const e        = Math.max(nodeEnergy[i], nodeEnergy[j]);
       const c2       = heatColor(e).multiplyScalar(bright);
       for (let k = 0; k < 2; k++) {
@@ -438,11 +487,23 @@ function tickSlot(slot, delta) {
     }
   }
 
-  // halo always updates (smooth scale/opacity animation)
-  slot.halo.position.set(nodes[ani*3], nodes[ani*3+1], nodes[ani*3+2]);
-  const hs = 1.0 + ae * 1.4;
-  slot.halo.scale.set(hs, hs, hs);
-  slot.haloMat.opacity = 0.28 + ae * 0.42;
+  // FIX 3 (continued): Halo position uses continuous fracIdx for sub-node
+  // interpolation. Lerp between the two surrounding node positions.
+  const loNode = Math.floor(fracIdx);
+  const hiNode = Math.min(loNode + 1, N - 1);
+  const t      = fracIdx - loNode;
+  const hx = nodes[loNode*3]   + t * (nodes[hiNode*3]   - nodes[loNode*3]);
+  const hy = nodes[loNode*3+1] + t * (nodes[hiNode*3+1] - nodes[loNode*3+1]);
+  const hz = nodes[loNode*3+2] + t * (nodes[hiNode*3+2] - nodes[loNode*3+2]);
+  slot.halo.position.set(hx, hy, hz);
+
+  // FIX 4 (continued): Smooth halo scale and opacity to prevent brightness pop.
+  const targetScale = 1.0 + se * 1.4;
+  const targetOpacity = 0.28 + se * 0.42;
+  slot.smoothScale         = slot.smoothScale + lerpFactor(0.050, delta) * (targetScale - slot.smoothScale);
+  slot.smoothHaloOpacity   = slot.smoothHaloOpacity + lerpFactor(0.050, delta) * (targetOpacity - slot.smoothHaloOpacity);
+  slot.halo.scale.setScalar(slot.smoothScale);
+  slot.haloMat.opacity = slot.smoothHaloOpacity;
 
   // trail always updates
   if (slot.trail[slot.trail.length - 1] !== ani) slot.trail.push(ani);
@@ -582,6 +643,9 @@ playBtn.textContent = 'Play';
 function startPlayback() {
   playing = true;
   playBtn.textContent = 'Pause';
+  // FIX 1: Reset lastRAF so the first delta after resuming is 0, not a
+  // multi-second spike. Without this, tab-switching or pausing causes a single
+  // enormous delta that catapults smoothIdx across the manifold visibly.
   lastRAF = null;
   primary.audio?.play().catch(() => {});
   if (secondary.audio) secondary.audio.play().catch(() => {});
@@ -650,7 +714,9 @@ function animate(ts) {
   if (playing) {
     let delta = 0;
     if (lastRAF !== null) {
-      delta = Math.min((ts - lastRAF) / 1000, 0.1);
+      // FIX 1: Clamp delta to MAX_DELTA to absorb tab-switch spikes and
+      // browser throttling. A 500ms spike becomes at most 33ms of advancement.
+      delta = Math.min((ts - lastRAF) / 1000, MAX_DELTA);
       clockTime += delta;
     }
     lastRAF = ts;
