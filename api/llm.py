@@ -1,6 +1,6 @@
 """
 api/llm.py
-LLM integration using Google Gemini Flash Lite (free tier).
+LLM integration using Google Gemini (free tier).
 
 Three capabilities:
   1. describe(species, matches)        — generate a rich species description
@@ -15,8 +15,10 @@ clear 503 rather than crashing at startup.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import json
+import re
 from typing import Any
 
 import httpx
@@ -24,16 +26,29 @@ import httpx
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash-lite:generateContent"
+    "gemini-2.0-flash:generateContent"
 )
+
+# Retry config for 429 rate limit errors
+_MAX_RETRIES = 3
+_RETRY_DELAY = 8  # seconds between retries
 
 
 def _available() -> bool:
     return bool(GEMINI_API_KEY)
 
 
+def _sanitise_error(message: str) -> str:
+    """Remove API key from error messages before returning to the client."""
+    if GEMINI_API_KEY:
+        message = message.replace(GEMINI_API_KEY, "[REDACTED]")
+    # Also strip any ?key=... query params from URLs in the message
+    message = re.sub(r"[?&]key=[^'\s&]+", "?key=[REDACTED]", message)
+    return message
+
+
 async def _call(prompt: str, temperature: float = 0.7) -> str:
-    """Single-turn call to Gemini Flash Lite. Returns the text response."""
+    """Single-turn call to Gemini. Retries up to 3x on 429. Returns text response."""
     if not _available():
         raise RuntimeError("GEMINI_API_KEY not set")
 
@@ -45,19 +60,40 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
         },
     }
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.post(
-            GEMINI_URL,
-            params={"key": GEMINI_API_KEY},
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    last_error: Exception | None = None
 
-    try:
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except (KeyError, IndexError) as exc:
-        raise RuntimeError(f"Unexpected Gemini response: {data}") from exc
+    for attempt in range(_MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    GEMINI_URL,
+                    params={"key": GEMINI_API_KEY},
+                    json=payload,
+                )
+                if resp.status_code == 429:
+                    wait = _RETRY_DELAY * (attempt + 1)
+                    await asyncio.sleep(wait)
+                    last_error = httpx.HTTPStatusError(
+                        _sanitise_error(f"Rate limited by Gemini (attempt {attempt + 1}/{_MAX_RETRIES})"),
+                        request=resp.request,
+                        response=resp,
+                    )
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        except httpx.HTTPStatusError as exc:
+            sanitised = _sanitise_error(str(exc))
+            last_error = RuntimeError(sanitised)
+            if exc.response.status_code != 429:
+                raise RuntimeError(sanitised) from exc
+        except Exception as exc:
+            raise RuntimeError(_sanitise_error(str(exc))) from exc
+
+    raise RuntimeError(
+        f"Gemini rate limit reached after {_MAX_RETRIES} retries. Please wait a moment and try again."
+    )
 
 
 async def describe(species: str, matches: list[dict[str, Any]]) -> str:
