@@ -24,12 +24,12 @@ from typing import Any
 import httpx
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# gemini-1.5-flash-8b: 1000 RPM on free tier — far more headroom than 2.0-flash (15 RPM)
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent"
+    "gemini-1.5-flash-8b:generateContent"
 )
 
-# Retry config for 429 rate limit errors
 _MAX_RETRIES = 3
 _RETRY_DELAY = 8  # seconds between retries
 
@@ -42,7 +42,6 @@ def _sanitise_error(message: str) -> str:
     """Remove API key from error messages before returning to the client."""
     if GEMINI_API_KEY:
         message = message.replace(GEMINI_API_KEY, "[REDACTED]")
-    # Also strip any ?key=... query params from URLs in the message
     message = re.sub(r"[?&]key=[^'\s&]+", "?key=[REDACTED]", message)
     return message
 
@@ -73,10 +72,8 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
                 if resp.status_code == 429:
                     wait = _RETRY_DELAY * (attempt + 1)
                     await asyncio.sleep(wait)
-                    last_error = httpx.HTTPStatusError(
-                        _sanitise_error(f"Rate limited by Gemini (attempt {attempt + 1}/{_MAX_RETRIES})"),
-                        request=resp.request,
-                        response=resp,
+                    last_error = RuntimeError(
+                        f"Rate limited (attempt {attempt + 1}/{_MAX_RETRIES})"
                     )
                     continue
                 resp.raise_for_status()
@@ -85,14 +82,14 @@ async def _call(prompt: str, temperature: float = 0.7) -> str:
 
         except httpx.HTTPStatusError as exc:
             sanitised = _sanitise_error(str(exc))
-            last_error = RuntimeError(sanitised)
             if exc.response.status_code != 429:
                 raise RuntimeError(sanitised) from exc
+            last_error = RuntimeError(sanitised)
         except Exception as exc:
             raise RuntimeError(_sanitise_error(str(exc))) from exc
 
     raise RuntimeError(
-        f"Gemini rate limit reached after {_MAX_RETRIES} retries. Please wait a moment and try again."
+        "Too many requests — please wait a moment and try again."
     )
 
 
