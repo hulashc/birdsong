@@ -13,5 +13,7 @@ services:
         value: birdsong_data.json
       - key: PYTHON_VERSION
         value: "3.11"
+      - key: GROQ_API_KEY
+        sync: false  # set manually in Render dashboard — required for LLM features
     healthCheckPath: /health
     autoDeploy: true

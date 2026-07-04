@@ -98,11 +98,11 @@ class ChatRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _llm_check() -> None:
-    """Raise 503 if Gemini API key is not configured."""
+    """Raise 503 if Groq API key is not configured."""
     if not llm._available():
         raise HTTPException(
             503,
-            "LLM not available — set the GEMINI_API_KEY environment variable on Render",
+            "LLM not available — set the GROQ_API_KEY environment variable on Render",
         )
 
 

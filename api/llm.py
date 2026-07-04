@@ -42,48 +42,8 @@ def _sanitise_error(message: str) -> str:
     return message
 
 
-async def _call(system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
-    """Single call to Groq. Retries up to 3x on 429."""
-    if not _available():
-        raise RuntimeError("GROQ_API_KEY not set")
-
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": 512,
-    }
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    for attempt in range(_MAX_RETRIES):
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(GROQ_URL, headers=headers, json=payload)
-                if resp.status_code == 429:
-                    await asyncio.sleep(_RETRY_DELAY * (attempt + 1))
-                    continue
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"].strip()
-        except httpx.HTTPStatusError as exc:
-            sanitised = _sanitise_error(str(exc))
-            if exc.response.status_code != 429:
-                raise RuntimeError(sanitised) from exc
-        except Exception as exc:
-            raise RuntimeError(_sanitise_error(str(exc))) from exc
-
-    raise RuntimeError("Too many requests — please wait a moment and try again.")
-
-
-async def _call_chat(messages: list[dict], temperature: float = 0.7) -> str:
-    """Multi-turn call to Groq using a full messages array."""
+async def _call_groq(messages: list[dict], temperature: float = 0.7) -> str:
+    """Core Groq call with retry logic. All public helpers delegate here."""
     if not _available():
         raise RuntimeError("GROQ_API_KEY not set")
 
@@ -119,6 +79,17 @@ async def _call_chat(messages: list[dict], temperature: float = 0.7) -> str:
     raise RuntimeError("Too many requests — please wait a moment and try again.")
 
 
+async def _call(system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
+    """Single system+user turn."""
+    return await _call_groq(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=temperature,
+    )
+
+
 async def describe(species: str, matches: list[dict[str, Any]]) -> str:
     match_summary = ", ".join(
         f"{m['species']} ({m['similarity_pct']:.0f}%)"
@@ -134,6 +105,7 @@ Write a concise engaging description (3-4 sentences) covering: what this bird lo
 
 
 async def search(query: str, species_list: list[str]) -> list[dict[str, Any]]:
+    species_set = set(species_list)
     species_json = json.dumps(species_list)
     system = "You are a birdsong expert. Return only valid JSON, no markdown, no explanation."
     user = f"""Available species: {species_json}
@@ -141,7 +113,7 @@ async def search(query: str, species_list: list[str]) -> list[dict[str, Any]]:
 User query: "{query}"
 
 Return a JSON array of up to 5 objects, each with:
-  - "species": exact name from the list
+  - "species": exact name from the list (lowercase with underscores)
   - "relevance_pct": integer 0-100
   - "reason": one sentence
 
@@ -161,7 +133,8 @@ If no species match, return []."""
                 "reason": r["reason"],
             }
             for r in results
-            if r.get("species") in species_list
+            # normalise to lowercase_underscore before checking membership
+            if r.get("species", "").lower().replace(" ", "_") in species_set
         ]
         return sorted(validated, key=lambda x: x["relevance_pct"], reverse=True)
     except (json.JSONDecodeError, KeyError) as exc:
@@ -185,4 +158,4 @@ async def chat(
     for turn in history:
         messages.append({"role": turn["role"], "content": turn["content"]})
 
-    return await _call_chat(messages, temperature=0.7)
+    return await _call_groq(messages, temperature=0.7)

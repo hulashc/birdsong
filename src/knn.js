@@ -69,10 +69,11 @@ export function classify(manifold, index, k = 3) {
 /**
  * distToSimilarity(distance)
  * Maps a Euclidean distance in PCA space to a 0–100% similarity score.
- * Uses an exponential decay: similarity = 100 * exp(-k * distance)
- * Calibrated so distance 0 → 100%, distance 2 → ~10%.
+ * Uses exponential decay: similarity = 100 * exp(-1.5 * distance)
+ * Synced with store.py _dist_to_similarity — browser and server scores match.
+ * Calibrated so distance 0 → 100%, distance ~1.4 → ~10%.
  */
 export function distToSimilarity(distance) {
-  const score = 100 * Math.exp(-1.15 * distance);
+  const score = 100 * Math.exp(-1.5 * distance);
   return Math.round(Math.max(1, Math.min(100, score)));
 }

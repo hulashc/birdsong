@@ -6,6 +6,8 @@
 
 import { extractManifold } from './features.js';
 
+const VALID_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'flac']);
+
 export function initUpload({ onManifold, onError, onProgress }) {
   const dropzone   = document.getElementById('dropzone');
   const fileInput  = document.getElementById('audioFileInput');
@@ -41,10 +43,16 @@ export function initUpload({ onManifold, onError, onProgress }) {
     }
   }
 
+  // ── Validate by both MIME type and file extension
+  function isAudioFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    return file.type.startsWith('audio/') || VALID_EXTENSIONS.has(ext);
+  }
+
   // ── Process a File object
   async function processFile(file) {
-    if (!file || !file.type.startsWith('audio/')) {
-      setStatus('Not an audio file.', true);
+    if (!file || !isAudioFile(file)) {
+      setStatus('Not an audio file. Supported: mp3, wav, ogg, flac', true);
       if (onError) onError(new Error('Not audio'));
       return;
     }
