@@ -50,6 +50,9 @@ app.add_middleware(
 DATA_PATH = Path(os.environ.get("BIRDSONG_DATA_PATH", "birdsong_data.json"))
 store = SpeciesStore(DATA_PATH)
 
+# Maximum chat turns to keep in context (prevents token limit crashes)
+_MAX_CHAT_HISTORY = 10
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -215,6 +218,7 @@ async def chat(body: ChatRequest) -> dict[str, str]:
 
     Send the full conversation history each time.
     The assistant has context of all species in the database.
+    History is capped at the last 10 turns to stay within token limits.
 
     Example body:
     {
@@ -225,7 +229,8 @@ async def chat(body: ChatRequest) -> dict[str, str]:
     """
     _llm_check()
     species_names = [s["species"] for s in store.list_metadata()]
-    history = [m.model_dump() for m in body.history]
+    # Cap history to prevent token limit crashes on long conversations
+    history = [m.model_dump() for m in body.history[-_MAX_CHAT_HISTORY:]]
     try:
         reply = await llm.chat(history, species_names)
     except Exception as exc:

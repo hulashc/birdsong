@@ -1,282 +1,160 @@
-# 🎵 Birdsong — Spatiotemporal Acoustic Manifold
+# Birdsong Acoustic Manifold
 
-> An interactive 3D visualisation of bird vocalisations using MFCC feature extraction, PCA dimensionality reduction, and kNN species classification — with a conversational AI assistant.
+[![CI](https://github.com/hulashc/birdsong/actions/workflows/ci.yml/badge.svg)](https://github.com/hulashc/birdsong/actions/workflows/ci.yml)
+[![Live Demo](https://img.shields.io/badge/live%20demo-hulashc.github.io-brightgreen)](https://hulashc.github.io/birdsong/)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Three.js](https://img.shields.io/badge/Three.js-r165-black?logo=threedotjs)](https://threejs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
-**[Live Demo →](https://hulashc.github.io/birdsong)**
+An interactive 3D acoustic manifold visualization of bird vocalisations. Extracts 57-dimensional MFCC feature vectors per frame, reduces them to 3 principal components via PCA, classifies species using kNN (cosine similarity, k=5), and serves it all through a FastAPI backend with a Three.js frontend and a conversational AI assistant powered by Llama 3.1.
 
-![GitHub deployments](https://img.shields.io/github/deployments/hulashc/birdsong/github-pages?label=frontend&style=flat-square)
-![Python](https://img.shields.io/badge/python-3.11-blue?style=flat-square)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=flat-square)
-![Three.js](https://img.shields.io/badge/Three.js-r160-black?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-
----
-
-## What is this?
-
-Birdsong processes audio recordings into sequences of 57-dimensional acoustic feature vectors (MFCCs + deltas + spectral features), reduces them to 3 principal components via PCA, and renders the result as an animated 3D trajectory — the **Acoustic Manifold**.
-
-Each point in the graph is one 23ms frame of audio. Its position encodes:
-
-| Axis | Name | What it means |
-|------|------|---------------|
-| X | **Timbre** | The tonal colour of the voice — what makes a blackbird sound like a blackbird |
-| Y | **Texture** | How rapidly the sound is changing — smooth whistle vs. rapid trill |
-| Z | **Spectral** | Where in the frequency range — deep boom vs. high-pitched call |
-
-Points are **coloured by energy** (dark → silence, amber → peak) and **sized by amplitude**. Species that sound similar trace similar paths through the manifold — which is how the classifier works.
+**[Try the live demo →](https://hulashc.github.io/birdsong/)**
 
 ---
 
-## Features
+## How It Works
 
-- 🌐 **3D Acoustic Manifold** — real-time Three.js trajectory animation per species
-- 🎤 **Upload & Compare** — drag-and-drop MP3/WAV/OGG/FLAC to visualise your own recording
-- 🔍 **kNN Classification** — identifies the closest matching species (cosine similarity, k=5)
-- 🤖 **AI Assistant** — conversational ornithology assistant powered by Llama 3.1 (Groq)
-- 🌙 **Dark / Light mode** — system preference detection with manual toggle
-- 📱 **Mobile responsive** — bottom-sheet drawer keeps the 3D canvas fully visible
+```
+Raw audio (.ogg/.mp3/.wav)
+    │
+    ▼
+[librosa] Extract 57-dim features per 23ms frame
+    │  MFCCs (40) + Chroma (12) + Centroid + Bandwidth + Rolloff + ZCR + Onset
+    ▼
+[sklearn] StandardScaler → PCA (57D → 3D)
+    │  PC1 = Timbre  |  PC2 = Texture  |  PC3 = Spectral Range
+    ▼
+[Three.js] Render acoustic manifold as animated 3D trajectory
+    │  Points coloured by energy (dark → silence, amber → peak)
+    ▼
+[kNN] Cosine similarity search → top-3 nearest species
+    ▼
+[Groq / Llama 3.1] Conversational ornithology assistant
+```
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    GitHub Pages                      │
-│  index.html + src/main.js (Three.js, vanilla JS)    │
-│  ← fetches manifold data and chat from API →        │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTPS
-┌──────────────────────▼──────────────────────────────┐
-│                 Render (FastAPI)                     │
-│                                                      │
-│  /api/species        → list species in database      │
-│  /api/manifold/{sp}  → PCA trajectory JSON           │
-│  /api/upload         → process uploaded audio        │
-│  /api/chat           → LLM conversation turn         │
-│                                                      │
-│  librosa → 57-feature extraction                     │
-│  scikit-learn → PCA fit + transform                  │
-│  scikit-learn → kNN cosine similarity                │
-│  Groq API → Llama 3.1 8B Instant                    │
-└─────────────────────────────────────────────────────┘
-```
-
-### Feature Vector (57 dimensions)
-
-```
-x_t = [ MFCC(1–13) | Δ MFCC(1–13) | ΔΔ MFCC(1–13) | centroid | bandwidth | rolloff | ZCR | RMS | mel(1–13) ]
-```
-
----
-
-## Project Structure
-
-```
-birdsong/
+birdssong/
+├── .github/workflows/ci.yml   # pytest on every push
 ├── api/
-│   ├── main.py            # FastAPI app, all endpoints
-│   ├── features.py        # MFCC + spectral extraction (librosa)
-│   ├── manifold.py        # PCA fit/transform, kNN classifier
-│   └── llm.py             # Groq LLM integration
+│   ├── main.py                  # FastAPI app + all endpoints
+│   ├── pipeline.py              # Audio → manifold pipeline
+│   ├── store.py                 # SpeciesStore + kNN classify
+│   ├── llm.py                   # Groq / Llama 3.1 integration
+│   └── tests/
+│       └── test_pipeline.py     # Unit tests (pytest)
 ├── src/
-│   └── main.js            # Three.js 3D renderer, upload handler
-├── birds/                 # Reference audio files per species
-├── scripts/               # Data preprocessing utilities
-├── process_birds.py       # Build birdsong_data.json from /birds
-├── birdsong_data.json     # Pre-extracted PCA manifold data
-├── index.html             # Single-page frontend
-├── requirements.txt
-├── pyproject.toml
-├── render.yaml            # Render deployment config
-└── .env.example
+│   ├── main.js                  # Three.js scene + animation loop
+│   ├── features.js              # Browser-side feature extraction
+│   ├── knn.js                   # Browser-side kNN classifier
+│   └── upload.js                # Drag-and-drop upload UI
+├── birds/                       # Source audio files (.ogg)
+├── birdsong_data.json           # Pre-processed manifold data
+├── process_birds.py             # Batch audio → JSON pipeline
+├── scripts/download_birds.py    # Download 20 UK bird recordings
+├── render.yaml                  # Render deployment config
+└── requirements.txt
 ```
 
 ---
 
-## Local Development
-
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://github.com/astral-sh/uv) (recommended) or pip
-- A [Groq API key](https://console.groq.com) (free)
-
-### 1. Clone and install
+## Quick Start
 
 ```bash
+# 1. Clone
 git clone https://github.com/hulashc/birdsong.git
 cd birdsong
 
-# with uv (recommended)
-uv sync
-
-# or with pip
+# 2. Install dependencies
 pip install -r requirements.txt
+
+# 3. Download bird audio (20 UK species from Wikimedia Commons)
+python scripts/download_birds.py
+
+# 4. Process audio → birdsong_data.json
+python process_birds.py
+
+# 5. Run the API
+PYTHONPATH=. uvicorn api.main:app --reload
+
+# 6. Open the frontend
+# Open index.html in your browser, or serve it:
+npx serve .
 ```
 
-### 2. Set environment variables
+---
 
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | Yes (for LLM features) | Groq API key — get one free at [console.groq.com](https://console.groq.com) |
+| `BIRDSONG_DATA_PATH` | No | Path to `birdsong_data.json` (default: `birdsong_data.json`) |
+
+Create a `.env` file from the provided example:
 ```bash
 cp .env.example .env
-# edit .env and add your key:
-# GROQ_API_KEY=gsk_...
+# Then add your GROQ_API_KEY
 ```
 
-### 3. Run the backend
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness probe + species count + LLM status |
+| `GET` | `/api/species` | List all species with metadata |
+| `POST` | `/api/process` | Upload audio file → manifold JSON |
+| `POST` | `/api/classify` | Manifold JSON → top-K nearest species |
+| `POST` | `/api/describe` | Classification result → LLM species description |
+| `POST` | `/api/search` | Natural language query → ranked species |
+| `POST` | `/api/chat` | Multi-turn conversational birdsong assistant |
+
+Full interactive docs available at `/docs` (Swagger UI) when the API is running.
+
+---
+
+## Running Tests
 
 ```bash
-# PowerShell
-./run.ps1
-
-# or directly
-uvicorn api.main:app --reload --port 8000
+PYTHONPATH=. pytest api/tests/ -v
 ```
 
-API docs available at `http://localhost:8000/docs`
-
-### 4. Serve the frontend
-
-Open `index.html` directly in your browser, or use any static server:
-
-```bash
-python -m http.server 3000
-# then visit http://localhost:3000
-```
-
----
-
-## Adding New Species
-
-1. Add audio files to `birds/<species_name>/` (any common format)
-2. Run the processing script:
-   ```bash
-   python process_birds.py
-   ```
-3. This rebuilds `birdsong_data.json` with updated PCA manifold data
-4. Commit and push — the frontend picks up the new species automatically
-
----
-
-## API Reference
-
-### `GET /api/species`
-Returns list of available species.
-```json
-["blackbird", "robin", "swift", "wren"]
-```
-
-### `GET /api/manifold/{species}`
-Returns the PCA trajectory for a species.
-```json
-{
-  "species": "blackbird",
-  "points": [
-    { "x": 0.42, "y": -1.1, "z": 0.87, "energy": 0.76, "amplitude": 0.54 }
-  ]
-}
-```
-
-### `POST /api/upload`
-Upload an audio file for classification.
-```
-Content-Type: multipart/form-data
-Body: file=<audio file>
-```
-Returns:
-```json
-{
-  "species": "blackbird",
-  "matches": [
-    { "species": "blackbird", "similarity_pct": 91.2 },
-    { "species": "robin",     "similarity_pct": 74.5 }
-  ],
-  "points": [ ... ]
-}
-```
-
-### `POST /api/chat`
-Send a conversational message to the AI assistant.
-```json
-{
-  "history": [
-    { "role": "user",      "content": "Tell me about the blackbird" },
-    { "role": "assistant", "content": "The blackbird is..." },
-    { "role": "user",      "content": "Where does it live?" }
-  ]
-}
-```
-Returns:
-```json
-{ "role": "assistant", "content": "The blackbird is found across..." }
-```
-
----
-
-## Deployment
-
-### Backend (Render)
-
-Configured via `render.yaml`. On push to `main`, Render automatically redeploys.
-
-Required environment variable in Render dashboard:
-```
-GROQ_API_KEY = gsk_...
-```
-
-### Frontend (GitHub Pages)
-
-Configured in repository **Settings → Pages → Deploy from branch `main`**.  
-No build step required — `index.html` is served directly.
-
-> **CORS:** The FastAPI backend has CORS configured to allow requests from the GitHub Pages origin. Update `api/main.py` if your frontend URL changes.
+Tests cover:
+- Feature extraction schema validation
+- XYZ coordinate normalisation (`[-1, 1]`)
+- Energy value clamping (`[0, 1]`)
+- Short audio `ValueError` handling
+- `SpeciesStore.classify` ranking correctness
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | Vanilla JS, Three.js r160, CSS custom properties |
-| Backend | Python 3.11, FastAPI, uvicorn |
-| Audio processing | librosa, numpy, soundfile |
-| ML | scikit-learn (PCA, kNN) |
-| LLM | Groq API — Llama 3.1 8B Instant |
-| Frontend hosting | GitHub Pages |
-| Backend hosting | Render |
+|---|---|
+| Audio features | librosa (MFCC, Chroma, Spectral) |
+| Dimensionality reduction | scikit-learn PCA |
+| Classification | kNN centroid distance (browser + server) |
+| Backend | FastAPI + Uvicorn |
+| Frontend 3D | Three.js + OrbitControls |
+| LLM | Groq / Llama 3.1 8B Instant |
+| Deployment | Render (API) + GitHub Pages (frontend) |
+| CI | GitHub Actions |
 
 ---
 
-## Roadmap
+## Research Paper
 
-- [ ] Live microphone input via Web Audio API
-- [ ] xeno-canto API integration (700k+ recordings)
-- [ ] BirdNET deep learning classifier backend
-- [ ] t-SNE / UMAP manifold comparison mode
-- [ ] Shareable manifold URLs
-- [ ] Species audio playback in-browser
+A full academic paper documenting the mathematical model, feature extraction pipeline, PCA reduction, and system architecture is available in the repository: [`Birdsong_paper.pdf`](Birdsong_paper.pdf)
 
 ---
 
-## References
+## Data Sources
 
-- Davis & Mermelstein (1980) — Original MFCC paper
-- McFee et al. (2015) — librosa
-- Briggs et al. (2012) — MFCC + kNN bird classification
-- Kahl et al. (2021) — [BirdNET](https://github.com/kahst/BirdNET-Analyzer)
-- Jolliffe (2002) — Principal Component Analysis
-- van der Maaten & Hinton (2008) — t-SNE
-- McInnes et al. (2018) — UMAP
-
----
-
-## Contributing
-
-Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
----
-
-## License
-
-MIT © [Hulash Chand](https://github.com/hulashc)
+All bird audio sourced from [Wikimedia Commons](https://commons.wikimedia.org/) under public domain or CC licenses. Run `scripts/download_birds.py` to download them automatically. A `CREDITS.md` file is generated in the `birds/` directory listing every source URL.

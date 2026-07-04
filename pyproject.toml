@@ -2,6 +2,7 @@
 # Makes `pytest` discoverable from the repo root without needing PYTHONPATH
 pythonpath = ["."]  # adds repo root to sys.path so `import api` works
 testpaths = ["api/tests"]
+asyncio_mode = "auto"  # required for pytest-asyncio to work without decorators
 
 [tool.uvicorn]
 # Not used directly, but documents the intended startup command
